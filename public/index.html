@@ -1,0 +1,734 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Melsoft Blog Agent — Topic Approval</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;500;600;700;800&family=Plus+Jakarta+Sans:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/marked/9.1.6/marked.min.js"></script>
+  <style>
+    :root {
+      --bg-dark: #080c14;
+      --bg-card: rgba(17, 24, 39, 0.7);
+      --bg-card-hover: rgba(26, 36, 56, 0.85);
+      --border-color: rgba(255, 255, 255, 0.08);
+      --text-primary: #f3f4f6;
+      --text-secondary: #9ca3af;
+      --text-muted: #6b7280;
+      
+      /* Accent colors */
+      --accent-primary: #6366f1;
+      --accent-primary-glow: rgba(99, 102, 241, 0.15);
+      --success-green: #10b981;
+      --success-glow: rgba(16, 185, 129, 0.15);
+
+      /* Badge colors */
+      --badge-tech-bg: rgba(79, 70, 229, 0.15);
+      --badge-tech-text: #a5b4fc;
+      --badge-skills-bg: rgba(217, 70, 239, 0.15);
+      --badge-skills-text: #f5d0fe;
+      --badge-recent-bg: rgba(245, 158, 11, 0.15);
+      --badge-recent-text: #fde047;
+      --badge-evergreen-bg: rgba(16, 185, 129, 0.15);
+      --badge-evergreen-text: #6ee7b7;
+    }
+
+    * {
+      box-sizing: border-box;
+      margin: 0;
+      padding: 0;
+    }
+
+    body {
+      font-family: 'Plus Jakarta Sans', sans-serif;
+      background-color: var(--bg-dark);
+      color: var(--text-primary);
+      min-height: 100vh;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      padding: 3rem 1.5rem;
+      overflow-x: hidden;
+      position: relative;
+    }
+
+    /* Ambient glow circles */
+    .glow-circle {
+      position: absolute;
+      width: 500px;
+      height: 500px;
+      border-radius: 50%;
+      background: radial-gradient(circle, var(--accent-primary-glow) 0%, rgba(8, 12, 20, 0) 70%);
+      top: -100px;
+      left: calc(50% - 250px);
+      z-index: 1;
+      pointer-events: none;
+    }
+
+    .container {
+      width: 100%;
+      max-width: 900px;
+      position: relative;
+      z-index: 2;
+    }
+
+    header {
+      text-align: center;
+      margin-bottom: 3.5rem;
+    }
+
+    header h1 {
+      font-family: 'Outfit', sans-serif;
+      font-size: 2.8rem;
+      font-weight: 800;
+      background: linear-gradient(135deg, #ffffff 40%, #a5b4fc 100%);
+      -webkit-background-clip: text;
+      -webkit-text-fill-color: transparent;
+      margin-bottom: 0.75rem;
+    }
+
+    header p {
+      color: var(--text-secondary);
+      font-size: 1.1rem;
+      font-weight: 400;
+      max-width: 600px;
+      margin: 0 auto;
+      line-height: 1.5;
+    }
+
+    /* Loading state */
+    .loading-container {
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      padding: 5rem 2rem;
+      background: var(--bg-card);
+      border: 1px solid var(--border-color);
+      border-radius: 20px;
+      backdrop-filter: blur(12px);
+      -webkit-backdrop-filter: blur(12px);
+      box-shadow: 0 10px 30px rgba(0, 0, 0, 0.2);
+    }
+
+    .spinner {
+      width: 48px;
+      height: 48px;
+      border: 4px solid rgba(255, 255, 255, 0.05);
+      border-top-color: var(--accent-primary);
+      border-radius: 50%;
+      animation: spin 1s linear infinite;
+      margin-bottom: 1.5rem;
+    }
+
+    .loading-text {
+      font-family: 'Outfit', sans-serif;
+      font-size: 1.3rem;
+      font-weight: 600;
+      color: var(--text-primary);
+      margin-bottom: 0.5rem;
+    }
+
+    .loading-subtext {
+      color: var(--text-secondary);
+      font-size: 0.95rem;
+      animation: pulse 1.5s infinite;
+    }
+
+    /* Error state */
+    .error-container {
+      background: rgba(239, 68, 68, 0.08);
+      border: 1px solid rgba(239, 68, 68, 0.2);
+      border-radius: 20px;
+      padding: 3rem 2rem;
+      text-align: center;
+    }
+
+    .error-title {
+      font-family: 'Outfit', sans-serif;
+      font-size: 1.4rem;
+      color: #fca5a5;
+      font-weight: 700;
+      margin-bottom: 0.5rem;
+    }
+
+    .error-message {
+      color: var(--text-secondary);
+      margin-bottom: 1.5rem;
+    }
+
+    .btn-retry {
+      background: var(--accent-primary);
+      color: white;
+      border: none;
+      padding: 0.75rem 1.5rem;
+      border-radius: 8px;
+      cursor: pointer;
+      font-weight: 600;
+      font-size: 0.95rem;
+      transition: all 0.2s;
+    }
+
+    .btn-retry:hover {
+      opacity: 0.9;
+    }
+
+    /* Topics Grid & Cards */
+    .topics-grid {
+      display: flex;
+      flex-direction: column;
+      gap: 1.5rem;
+      transition: all 0.4s ease-in-out;
+    }
+
+    .card {
+      background: var(--bg-card);
+      border: 1px solid var(--border-color);
+      border-radius: 20px;
+      padding: 2rem;
+      backdrop-filter: blur(12px);
+      -webkit-backdrop-filter: blur(12px);
+      transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+      position: relative;
+      display: flex;
+      flex-direction: column;
+      justify-content: space-between;
+      min-height: 220px;
+    }
+
+    .card:hover {
+      transform: translateY(-4px);
+      background: var(--bg-card-hover);
+      border-color: rgba(99, 102, 241, 0.3);
+      box-shadow: 0 12px 30px rgba(0, 0, 0, 0.4), 0 0 1px 1px rgba(99, 102, 241, 0.15) inset;
+    }
+
+    .card-top {
+      margin-bottom: 1.5rem;
+    }
+
+    .badges-row {
+      display: flex;
+      gap: 0.5rem;
+      margin-bottom: 1rem;
+    }
+
+    .badge {
+      display: inline-block;
+      font-size: 0.72rem;
+      font-weight: 800;
+      letter-spacing: 0.05em;
+      padding: 0.3rem 0.75rem;
+      border-radius: 6px;
+      text-transform: uppercase;
+    }
+
+    /* Badge specific coloring */
+    .badge-tech {
+      background: var(--badge-tech-bg);
+      color: var(--badge-tech-text);
+      border: 1px solid rgba(79, 70, 229, 0.2);
+    }
+
+    .badge-skills {
+      background: var(--badge-skills-bg);
+      color: var(--badge-skills-text);
+      border: 1px solid rgba(217, 70, 239, 0.2);
+    }
+
+    .badge-recent {
+      background: var(--badge-recent-bg);
+      color: var(--badge-recent-text);
+      border: 1px solid rgba(245, 158, 11, 0.2);
+    }
+
+    .badge-evergreen {
+      background: var(--badge-evergreen-bg);
+      color: var(--badge-evergreen-text);
+      border: 1px solid rgba(16, 185, 129, 0.2);
+    }
+
+    .card-title {
+      font-family: 'Outfit', sans-serif;
+      font-size: 1.4rem;
+      font-weight: 700;
+      color: var(--text-primary);
+      margin-bottom: 0.75rem;
+      line-height: 1.35;
+    }
+
+    .card-pitch {
+      color: var(--text-secondary);
+      font-size: 0.98rem;
+      line-height: 1.55;
+    }
+
+    .card-bottom {
+      display: flex;
+      align-items: center;
+      justify-content: flex-end;
+      margin-top: 1.5rem;
+      border-top: 1px solid rgba(255, 255, 255, 0.04);
+      padding-top: 1.25rem;
+    }
+
+    .source-notes {
+      font-size: 0.8rem;
+      color: var(--text-muted);
+      max-width: 65%;
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      margin-right: auto;
+    }
+
+    .btn-select {
+      background: linear-gradient(135deg, var(--accent-primary) 0%, #4f46e5 100%);
+      color: white;
+      border: none;
+      padding: 0.75rem 1.5rem;
+      border-radius: 10px;
+      font-weight: 600;
+      cursor: pointer;
+      box-shadow: 0 4px 10px rgba(99, 102, 241, 0.2);
+      transition: all 0.2s ease-in-out;
+    }
+
+    .btn-select:hover {
+      transform: translateY(-1px);
+      box-shadow: 0 6px 15px rgba(99, 102, 241, 0.35);
+    }
+
+    /* Selection Confirmation State */
+    .topics-grid.has-selection .card:not(.selected) {
+      opacity: 0.4;
+      pointer-events: none;
+      transform: scale(0.98);
+      filter: grayscale(80%);
+    }
+
+    .topics-grid.has-selection .card.selected {
+      border-color: var(--success-green);
+      box-shadow: 0 0 25px rgba(16, 185, 129, 0.2);
+    }
+
+    .card.selected .btn-select {
+      background: var(--success-green);
+      box-shadow: 0 4px 10px rgba(16, 185, 129, 0.2);
+      cursor: default;
+      pointer-events: none;
+    }
+
+    .success-alert {
+      display: none;
+      background: var(--success-glow);
+      border: 1px solid rgba(16, 185, 129, 0.3);
+      color: #a7f3d0;
+      border-radius: 16px;
+      padding: 1.25rem 2rem;
+      margin-bottom: 2.5rem;
+      text-align: center;
+      font-weight: 600;
+      font-family: 'Outfit', sans-serif;
+      font-size: 1.15rem;
+      animation: slideDown 0.4s cubic-bezier(0.16, 1, 0.3, 1);
+    }
+
+    /* Animations */
+    @keyframes spin {
+      0% { transform: rotate(0deg); }
+      100% { transform: rotate(360deg); }
+    }
+
+    @keyframes pulse {
+      0%, 100% { opacity: 0.6; }
+      50% { opacity: 1; }
+    }
+
+    @keyframes slideDown {
+      from {
+        opacity: 0;
+        transform: translateY(-20px);
+      }
+      to {
+        opacity: 1;
+        transform: translateY(0);
+      }
+    }
+
+    /* Responsive */
+    @media (max-width: 768px) {
+      body {
+        padding: 2rem 1rem;
+      }
+      header h1 {
+        font-size: 2.2rem;
+      }
+      .card {
+        padding: 1.5rem;
+      }
+      .card-bottom {
+        flex-direction: column;
+        align-items: stretch;
+        gap: 1rem;
+      }
+      .source-notes {
+        max-width: 100%;
+        text-align: center;
+      }
+      .btn-select {
+        width: 100%;
+        text-align: center;
+      }
+    }
+
+    /* Styles for the rendered blog post */
+    .post-container {
+      background: var(--bg-card);
+      border: 1px solid var(--border-color);
+      border-radius: 24px;
+      padding: 3rem 2.5rem;
+      backdrop-filter: blur(12px);
+      -webkit-backdrop-filter: blur(12px);
+      box-shadow: 0 10px 40px rgba(0, 0, 0, 0.3);
+      animation: slideDown 0.5s cubic-bezier(0.16, 1, 0.3, 1);
+    }
+    
+    .post-meta-box {
+      background: rgba(99, 102, 241, 0.05);
+      border-left: 4px solid var(--accent-primary);
+      padding: 1.25rem 1.5rem;
+      border-radius: 0 12px 12px 0;
+      margin-bottom: 2.5rem;
+      font-size: 0.95rem;
+      line-height: 1.5;
+    }
+    
+    .post-meta-box strong {
+      color: var(--text-primary);
+    }
+
+    .post-meta-box p {
+      color: var(--text-secondary);
+      margin: 0;
+      margin-top: 0.25rem;
+    }
+
+    .post-body {
+      font-size: 1.05rem;
+      line-height: 1.7;
+      color: var(--text-primary);
+      text-align: left;
+    }
+
+    .post-body h2 {
+      font-family: 'Outfit', sans-serif;
+      font-size: 1.8rem;
+      font-weight: 700;
+      margin-top: 2.5rem;
+      margin-bottom: 1rem;
+      color: var(--text-primary);
+      border-bottom: 1px solid rgba(255, 255, 255, 0.05);
+      padding-bottom: 0.5rem;
+    }
+
+    .post-body h3 {
+      font-family: 'Outfit', sans-serif;
+      font-size: 1.4rem;
+      font-weight: 600;
+      margin-top: 2rem;
+      margin-bottom: 0.75rem;
+      color: var(--text-primary);
+    }
+
+    .post-body p {
+      margin-bottom: 1.5rem;
+      color: var(--text-secondary);
+    }
+
+    .post-body ul, .post-body ol {
+      margin-bottom: 1.5rem;
+      padding-left: 1.5rem;
+      color: var(--text-secondary);
+    }
+
+    .post-body li {
+      margin-bottom: 0.5rem;
+    }
+
+    .post-body table {
+      width: 100%;
+      border-collapse: collapse;
+      margin-bottom: 2rem;
+      margin-top: 1.5rem;
+      background: rgba(255, 255, 255, 0.02);
+      border-radius: 12px;
+      overflow: hidden;
+      border: 1px solid var(--border-color);
+    }
+
+    .post-body th, .post-body td {
+      padding: 0.75rem 1rem;
+      text-align: left;
+      border-bottom: 1px solid rgba(255, 255, 255, 0.05);
+    }
+
+    .post-body th {
+      background: rgba(255, 255, 255, 0.04);
+      color: var(--text-primary);
+      font-weight: 600;
+    }
+
+    .post-body tr:last-child td {
+      border-bottom: none;
+    }
+
+    .post-body blockquote {
+      border-left: 4px solid var(--success-green);
+      background: rgba(16, 185, 129, 0.03);
+      padding: 1rem 1.5rem;
+      margin-bottom: 1.5rem;
+      border-radius: 0 8px 8px 0;
+    }
+
+    .post-body blockquote p {
+      margin: 0;
+      font-style: italic;
+    }
+
+    .post-header {
+      margin-bottom: 2rem;
+      text-align: left;
+    }
+
+    .post-header h1 {
+      font-family: 'Outfit', sans-serif;
+      font-size: 2.4rem;
+      font-weight: 800;
+      line-height: 1.25;
+      margin-bottom: 1rem;
+      color: var(--text-primary);
+    }
+
+    .post-header-meta {
+      display: flex;
+      gap: 0.75rem;
+      align-items: center;
+      margin-bottom: 1.5rem;
+    }
+
+    .btn-back {
+      display: block;
+      background: transparent;
+      color: var(--text-secondary);
+      border: 1px solid var(--border-color);
+      padding: 0.6rem 1.25rem;
+      border-radius: 8px;
+      cursor: pointer;
+      font-weight: 600;
+      margin-bottom: 2rem;
+      transition: all 0.2s;
+    }
+
+    .btn-back:hover {
+      background: rgba(255, 255, 255, 0.05);
+      color: var(--text-primary);
+      border-color: rgba(255, 255, 255, 0.15);
+    }
+  </style>
+</head>
+<body>
+  <div class="glow-circle"></div>
+  
+  <div class="container">
+    <header>
+      <h1>Melsoft Blog Agent</h1>
+      <p>Automated research and selection. Review the curated candidate articles and select one to generate a high-impact blog post.</p>
+    </header>
+
+    <div id="successAlert" class="success-alert"></div>
+
+    <div id="appContainer">
+      <!-- Loading State -->
+      <div id="loadingState" class="loading-container">
+        <div class="spinner"></div>
+        <div class="loading-text">Generating candidate topics</div>
+        <div class="loading-subtext">Running South African news search and applying B-BBEE, QCTO and SETA scoring rules...</div>
+      </div>
+
+      <!-- Error State -->
+      <div id="errorState" class="error-container" style="display: none;">
+        <div id="errorTitle" class="error-title">Failed to load topics</div>
+        <div id="errorMessage" class="error-message">An unexpected error occurred. Please ensure your Anthropic API Key is correct in your .env file.</div>
+        <button id="errorBtn" class="btn-retry" onclick="loadTopics()">Retry Generation</button>
+      </div>
+
+      <!-- Topics Grid -->
+      <div id="topicsGrid" class="topics-grid" style="display: none;"></div>
+
+      <!-- Post Container -->
+      <div id="postContainer" class="post-container" style="display: none;"></div>
+    </div>
+  </div>
+
+  <script>
+    let activeTopics = [];
+
+    async function loadTopics() {
+      const loadingState = document.getElementById('loadingState');
+      const errorState = document.getElementById('errorState');
+      const topicsGrid = document.getElementById('topicsGrid');
+      const successAlert = document.getElementById('successAlert');
+
+      // Reset UI states
+      loadingState.style.display = 'flex';
+      errorState.style.display = 'none';
+      topicsGrid.style.display = 'none';
+      topicsGrid.className = 'topics-grid';
+      successAlert.style.display = 'none';
+      topicsGrid.innerHTML = '';
+
+      try {
+        const response = await fetch('/api/topics');
+        if (!response.ok) {
+          throw new Error(`Server returned status ${response.status}`);
+        }
+        
+        const data = await response.json();
+        activeTopics = data.topics;
+
+        if (!activeTopics || activeTopics.length === 0) {
+          throw new Error('No topics returned by the agent.');
+        }
+
+        renderTopics(activeTopics);
+        
+        loadingState.style.display = 'none';
+        topicsGrid.style.display = 'flex';
+      } catch (err) {
+        console.error('Error fetching topics:', err);
+        document.getElementById('errorMessage').innerText = err.message || 'Make sure your ANTHROPIC_API_KEY is configured in your .env file.';
+        loadingState.style.display = 'none';
+        errorState.style.display = 'block';
+      }
+    }
+
+    function renderTopics(topics) {
+      const grid = document.getElementById('topicsGrid');
+      grid.innerHTML = '';
+
+      topics.forEach((topic, index) => {
+        const pillarClass = topic.pillar === 'tech' ? 'badge-tech' : 'badge-skills';
+        const typeClass = topic.type === 'recent' ? 'badge-recent' : 'badge-evergreen';
+
+        // Parse short readable text for source notes
+        let shortNotes = topic.sourceNotes || '';
+        if (shortNotes.startsWith('http')) {
+          try {
+            shortNotes = new URL(shortNotes).hostname;
+          } catch(e) {}
+        }
+
+        const card = document.createElement('div');
+        card.className = `card`;
+        card.id = `card-${index}`;
+        card.innerHTML = `
+          <div class="card-top">
+            <div class="badges-row">
+              <span class="badge ${pillarClass}">${topic.pillar}</span>
+              <span class="badge ${typeClass}">${topic.type}</span>
+            </div>
+            <h2 class="card-title">${topic.title}</h2>
+            <p class="card-pitch">${topic.pitch}</p>
+          </div>
+          <div class="card-bottom">
+            <span class="source-notes" title="${topic.sourceNotes || ''}">Source: ${topic.sourceNotes || 'Evergreen Bank'}</span>
+            <button class="btn-select" onclick="approveTopic(${index})">Select this topic</button>
+          </div>
+        `;
+        grid.appendChild(card);
+      });
+    }
+
+    async function approveTopic(index) {
+      const topic = activeTopics[index];
+      const grid = document.getElementById('topicsGrid');
+      const successAlert = document.getElementById('successAlert');
+      const loadingState = document.getElementById('loadingState');
+      const errorState = document.getElementById('errorState');
+      const postContainer = document.getElementById('postContainer');
+
+      // 1. Show generation loading state
+      loadingState.querySelector('.loading-text').innerText = 'Writing your blog post...';
+      loadingState.querySelector('.loading-subtext').innerText = 'Claude is drafting, structuring, and fact-checking against South African sources (this may take 20-30 seconds)...';
+      
+      loadingState.style.display = 'flex';
+      grid.style.display = 'none';
+      successAlert.style.display = 'none';
+
+      try {
+        const response = await fetch('/api/approve', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json'
+          },
+          body: JSON.stringify({ topic })
+        });
+
+        if (!response.ok) {
+          const errData = await response.json().catch(() => ({}));
+          throw new Error(errData.details || 'Approval and post generation failed');
+        }
+
+        const data = await response.json();
+        const post = data.post;
+
+        // Hide loading state
+        loadingState.style.display = 'none';
+
+        // Render completed post
+        const pillarClass = post.pillar === 'tech' ? 'badge-tech' : 'badge-skills';
+        const typeClass = post.type === 'recent' ? 'badge-recent' : 'badge-evergreen';
+
+        postContainer.innerHTML = `
+          <button class="btn-back" onclick="window.location.reload()">← Back to Topics</button>
+          <div class="post-header">
+            <div class="post-header-meta">
+              <span class="badge ${pillarClass}">${post.pillar}</span>
+              <span class="badge ${typeClass}">${post.type}</span>
+            </div>
+            <h1>${post.title}</h1>
+          </div>
+          <div class="post-meta-box">
+            <strong>SEO Meta Description (150-160 chars):</strong>
+            <p>${post.metaDescription}</p>
+          </div>
+          <div class="post-body">
+            ${marked.parse(post.bodyMarkdown)}
+          </div>
+        `;
+        postContainer.style.display = 'block';
+        
+      } catch (err) {
+        console.error('Error generating blog post:', err);
+        
+        // Render error state with a reload retry button
+        loadingState.style.display = 'none';
+        document.getElementById('errorTitle').innerText = 'Failed to generate blog post';
+        document.getElementById('errorMessage').innerText = err.message || 'An unexpected error occurred during generation.';
+        
+        const retryBtn = document.getElementById('errorBtn');
+        retryBtn.innerText = 'Try again';
+        retryBtn.onclick = () => window.location.reload();
+        
+        errorState.style.display = 'block';
+      }
+    }
+
+    // Load topics when page loads
+    window.addEventListener('DOMContentLoaded', loadTopics);
+  </script>
+</body>
+</html>
