@@ -4,6 +4,7 @@ import dotenv from 'dotenv';
 import { fileURLToPath } from 'url';
 import path from 'path';
 import fs from 'fs/promises';
+import { jsonrepair } from 'jsonrepair';
 
 // Load environment variables
 dotenv.config();
@@ -110,8 +111,15 @@ export async function writePost(topic) {
   try {
     parsedPost = JSON.parse(responseText);
   } catch (err) {
-    console.error('Failed to parse Claude JSON response. Raw response was:', responseText);
-    throw new Error(`JSON parsing failed: ${err.message}`);
+    console.warn('[writer] Standard JSON.parse failed. Attempting repair with jsonrepair...');
+    try {
+      const repairedText = jsonrepair(responseText);
+      parsedPost = JSON.parse(repairedText);
+      console.log('[writer] JSON repaired and parsed successfully!');
+    } catch (repairErr) {
+      console.error('Failed to parse and repair Claude JSON response. Raw response was:', responseText);
+      throw new Error(`JSON parsing failed: ${err.message}`);
+    }
   }
 
   // Post-processing cleanup: strip <cite> tags from title, meta description, and body

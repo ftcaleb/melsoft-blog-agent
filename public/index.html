@@ -683,30 +683,38 @@
         }
 
         const data = await response.json();
-        const post = data.post;
 
         // Hide loading state
         loadingState.style.display = 'none';
 
-        // Render completed post
-        const pillarClass = post.pillar === 'tech' ? 'badge-tech' : 'badge-skills';
-        const typeClass = post.type === 'recent' ? 'badge-recent' : 'badge-evergreen';
-
+        // Render success confirmation message
         postContainer.innerHTML = `
-          <button class="btn-back" onclick="window.location.reload()">← Back to Topics</button>
-          <div class="post-header">
-            <div class="post-header-meta">
-              <span class="badge ${pillarClass}">${post.pillar}</span>
-              <span class="badge ${typeClass}">${post.type}</span>
+          <div class="success-confirmation" style="background-color: rgba(16, 185, 129, 0.08); border: 1px solid rgba(16, 185, 129, 0.2); padding: 2.5rem; border-radius: 16px; text-align: center; margin-top: 1rem;">
+            <div style="background-color: var(--success-green); width: 64px; height: 64px; border-radius: 50%; display: flex; align-items: center; justify-content: center; margin: 0 auto 1.5rem auto; color: white;">
+              <svg width="32" height="32" fill="none" stroke="currentColor" stroke-width="2.5" viewBox="0 0 24 24">
+                <path stroke-linecap="round" stroke-linejoin="round" d="M5 13l4 4L19 7" />
+              </svg>
             </div>
-            <h1>${post.title}</h1>
-          </div>
-          <div class="post-meta-box">
-            <strong>SEO Meta Description (150-160 chars):</strong>
-            <p>${post.metaDescription}</p>
-          </div>
-          <div class="post-body">
-            ${marked.parse(post.bodyMarkdown)}
+            <h1 style="font-family: 'Outfit', sans-serif; font-size: 2.2rem; font-weight: 800; background: linear-gradient(135deg, #ffffff 40%, #6ee7b7 100%); -webkit-background-clip: text; -webkit-text-fill-color: transparent; margin-bottom: 1rem;">
+              Draft Created Successfully!
+            </h1>
+            <p style="color: var(--text-secondary); font-size: 1.1rem; margin-bottom: 1.5rem; line-height: 1.6; max-width: 600px; margin-left: auto; margin-right: auto;">
+              The blog post has been successfully generated and saved to Supabase as a draft.
+            </p>
+            
+            <div style="background-color: rgba(0, 0, 0, 0.2); border: 1px solid var(--border-color); border-radius: 8px; padding: 1rem; max-width: 500px; margin: 0 auto 2rem auto; font-family: monospace; font-size: 0.95rem; text-align: left; word-break: break-all;">
+              <span style="color: var(--text-muted)">Draft ID:</span> <span style="color: var(--text-primary)">${data.draftId}</span><br>
+              <span style="color: var(--text-muted)">Slug:</span> <span style="color: var(--badge-tech-text)">${data.slug}</span>
+            </div>
+
+            <div style="display: flex; gap: 1rem; justify-content: center;">
+              <button class="btn-select" style="background-color: var(--accent-primary); border-color: var(--accent-primary); cursor: pointer;" onclick="window.location.href='/dashboard.html'">
+                Open Admin Dashboard
+              </button>
+              <button class="btn-select" style="background-color: transparent; border-color: var(--border-color); cursor: pointer;" onclick="window.location.reload()">
+                Approve More Topics
+              </button>
+            </div>
           </div>
         `;
         postContainer.style.display = 'block';

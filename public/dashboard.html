@@ -1,0 +1,1484 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Melsoft Academy — Blog Admin Dashboard</title>
+  
+  <!-- Fonts -->
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;500;600;700;800&family=Plus+Jakarta+Sans:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+  
+  <!-- Supabase CDN -->
+  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+  
+  <style>
+    :root {
+      /* Palette */
+      --bg-dark: #090e17;
+      --bg-surface: #111827;
+      --bg-surface-hover: #1e293b;
+      --border-color: rgba(255, 255, 255, 0.08);
+      --text-primary: #f3f4f6;
+      --text-secondary: #9ca3af;
+      --text-muted: #6b7280;
+      
+      /* Accents */
+      --accent: #6366f1;
+      --accent-hover: #4f46e5;
+      --accent-glow: rgba(99, 102, 241, 0.2);
+      --success: #10b981;
+      --success-glow: rgba(16, 185, 129, 0.15);
+      --danger: #ef4444;
+      --danger-glow: rgba(239, 68, 68, 0.15);
+
+      /* Card Tints representing the React template's config colors */
+      --tint-sky: #e0f2fe;
+      --tint-peach: #ffedd5;
+      --tint-mint: #d1fae5;
+      --tint-lilac: #f3e8ff;
+      
+      /* Tint Text Colors for Light Card styling */
+      --tint-sky-text: #0369a1;
+      --tint-peach-text: #c2410c;
+      --tint-mint-text: #047857;
+      --tint-lilac-text: #7e22ce;
+    }
+
+    * {
+      box-sizing: border-box;
+      margin: 0;
+      padding: 0;
+    }
+
+    body {
+      font-family: 'Plus Jakarta Sans', sans-serif;
+      background-color: var(--bg-dark);
+      color: var(--text-primary);
+      min-height: 100vh;
+      display: flex;
+      flex-direction: column;
+      line-height: 1.5;
+    }
+
+    /* Common Layout & Header */
+    header {
+      background-color: rgba(17, 24, 39, 0.8);
+      backdrop-filter: blur(12px);
+      border-bottom: 1px solid var(--border-color);
+      padding: 1.25rem 2rem;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      position: sticky;
+      top: 0;
+      z-index: 100;
+    }
+
+    .logo-container {
+      display: flex;
+      align-items: center;
+      gap: 0.75rem;
+    }
+
+    .logo-badge {
+      background: linear-gradient(135deg, var(--accent) 0%, #a5b4fc 100%);
+      width: 10px;
+      height: 24px;
+      border-radius: 4px;
+    }
+
+    .logo-text {
+      font-family: 'Outfit', sans-serif;
+      font-size: 1.25rem;
+      font-weight: 700;
+      letter-spacing: -0.02em;
+    }
+
+    .logo-subtitle {
+      color: var(--text-muted);
+      font-size: 0.875rem;
+      margin-left: 0.5rem;
+    }
+
+    .nav-actions {
+      display: flex;
+      align-items: center;
+      gap: 1rem;
+    }
+
+    /* Buttons */
+    .btn {
+      font-family: 'Plus Jakarta Sans', sans-serif;
+      font-size: 0.875rem;
+      font-weight: 600;
+      padding: 0.625rem 1.25rem;
+      border-radius: 8px;
+      border: 1px solid transparent;
+      cursor: pointer;
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      gap: 0.5rem;
+      transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
+    }
+
+    .btn-primary {
+      background-color: var(--accent);
+      color: #ffffff;
+    }
+
+    .btn-primary:hover {
+      background-color: var(--accent-hover);
+      box-shadow: 0 0 12px var(--accent-glow);
+    }
+
+    .btn-secondary {
+      background-color: transparent;
+      border-color: var(--border-color);
+      color: var(--text-primary);
+    }
+
+    .btn-secondary:hover {
+      background-color: rgba(255, 255, 255, 0.05);
+      border-color: rgba(255, 255, 255, 0.2);
+    }
+
+    .btn-danger {
+      background-color: rgba(239, 68, 68, 0.1);
+      border-color: rgba(239, 68, 68, 0.2);
+      color: var(--danger);
+    }
+
+    .btn-danger:hover {
+      background-color: var(--danger);
+      color: #ffffff;
+    }
+
+    /* Notifications & Status Banner */
+    .status-banner {
+      padding: 1rem 2rem;
+      display: none;
+      align-items: center;
+      gap: 0.75rem;
+      font-size: 0.875rem;
+      font-weight: 500;
+      border-bottom: 1px solid var(--border-color);
+      animation: slideDown 0.3s ease;
+    }
+
+    .status-banner.success {
+      display: flex;
+      background-color: rgba(16, 185, 129, 0.1);
+      border-bottom-color: rgba(16, 185, 129, 0.2);
+      color: var(--success);
+    }
+
+    .status-banner.error {
+      display: flex;
+      background-color: rgba(239, 68, 68, 0.1);
+      border-bottom-color: rgba(239, 68, 68, 0.2);
+      color: var(--danger);
+    }
+
+    /* Main Container */
+    main {
+      flex: 1;
+      padding: 2.5rem 2rem;
+      max-width: 1400px;
+      width: 100%;
+      margin: 0 auto;
+      display: flex;
+      flex-direction: column;
+    }
+
+    /* View classes */
+    .view-container {
+      display: none;
+      width: 100%;
+    }
+
+    .view-container.active {
+      display: block;
+    }
+
+    /* LOGIN VIEW */
+    #login-view {
+      margin: auto;
+      max-width: 420px;
+      width: 100%;
+      padding: 3rem 0;
+    }
+
+    .login-card {
+      background-color: var(--bg-surface);
+      border: 1px solid var(--border-color);
+      border-radius: 16px;
+      padding: 2.5rem;
+      box-shadow: 0 10px 25px -5px rgba(0, 0, 0, 0.3);
+    }
+
+    .login-header {
+      text-align: center;
+      margin-bottom: 2rem;
+    }
+
+    .login-header h2 {
+      font-family: 'Outfit', sans-serif;
+      font-size: 1.75rem;
+      font-weight: 700;
+      margin-bottom: 0.5rem;
+    }
+
+    .login-header p {
+      color: var(--text-secondary);
+      font-size: 0.875rem;
+    }
+
+    /* Forms & Inputs */
+    .form-group {
+      margin-bottom: 1.25rem;
+    }
+
+    .form-group label {
+      display: block;
+      font-size: 0.875rem;
+      font-weight: 600;
+      margin-bottom: 0.5rem;
+      color: var(--text-secondary);
+    }
+
+    .input-field {
+      width: 100%;
+      background-color: rgba(0, 0, 0, 0.2);
+      border: 1px solid var(--border-color);
+      color: var(--text-primary);
+      padding: 0.75rem 1rem;
+      border-radius: 8px;
+      font-family: inherit;
+      font-size: 0.875rem;
+      outline: none;
+      transition: all 0.2s;
+    }
+
+    .input-field:focus {
+      border-color: var(--accent);
+      box-shadow: 0 0 0 3px rgba(99, 102, 241, 0.15);
+      background-color: rgba(0, 0, 0, 0.3);
+    }
+
+    textarea.input-field {
+      resize: vertical;
+      min-height: 100px;
+    }
+
+    /* DRAFT LIST VIEW */
+    .list-header {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      margin-bottom: 2rem;
+    }
+
+    .list-header h2 {
+      font-family: 'Outfit', sans-serif;
+      font-size: 1.75rem;
+      font-weight: 700;
+    }
+
+    .drafts-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fill, minmax(320px, 1fr));
+      gap: 1.5rem;
+    }
+
+    .draft-card {
+      background-color: var(--bg-surface);
+      border: 1px solid var(--border-color);
+      border-radius: 12px;
+      padding: 1.5rem;
+      display: flex;
+      flex-direction: column;
+      transition: all 0.25s ease;
+      position: relative;
+      overflow: hidden;
+    }
+
+    .draft-card:hover {
+      transform: translateY(-4px);
+      border-color: rgba(255, 255, 255, 0.15);
+      box-shadow: 0 12px 20px -10px rgba(0, 0, 0, 0.5);
+    }
+
+    .draft-card-header {
+      display: flex;
+      justify-content: space-between;
+      align-items: flex-start;
+      margin-bottom: 1rem;
+    }
+
+    .draft-card-date {
+      font-size: 0.75rem;
+      color: var(--text-muted);
+      font-weight: 500;
+    }
+
+    .draft-card-title {
+      font-family: 'Outfit', sans-serif;
+      font-size: 1.125rem;
+      font-weight: 600;
+      line-height: 1.4;
+      margin-bottom: 0.75rem;
+      color: #ffffff;
+    }
+
+    .draft-card-excerpt {
+      font-size: 0.875rem;
+      color: var(--text-secondary);
+      line-height: 1.5;
+      margin-bottom: 1.5rem;
+      flex: 1;
+      display: -webkit-box;
+      -webkit-line-clamp: 3;
+      -webkit-box-orient: vertical;
+      overflow: hidden;
+    }
+
+    .draft-card-actions {
+      border-top: 1px solid var(--border-color);
+      padding-top: 1rem;
+      display: flex;
+      justify-content: flex-end;
+    }
+
+    .empty-state {
+      text-align: center;
+      padding: 4rem 2rem;
+      background-color: var(--bg-surface);
+      border: 1px dashed var(--border-color);
+      border-radius: 12px;
+      max-width: 500px;
+      margin: 2rem auto;
+    }
+
+    .empty-state-title {
+      font-family: 'Outfit', sans-serif;
+      font-size: 1.25rem;
+      font-weight: 600;
+      margin-bottom: 0.5rem;
+    }
+
+    .empty-state-desc {
+      color: var(--text-secondary);
+      font-size: 0.875rem;
+    }
+
+    /* DRAFT DETAIL / EDIT VIEW */
+    .editor-header {
+      display: flex;
+      align-items: center;
+      gap: 1.5rem;
+      margin-bottom: 2rem;
+      border-bottom: 1px solid var(--border-color);
+      padding-bottom: 1.25rem;
+    }
+
+    .editor-header-title {
+      flex: 1;
+    }
+
+    .editor-header-title h2 {
+      font-family: 'Outfit', sans-serif;
+      font-size: 1.75rem;
+      font-weight: 700;
+      margin-bottom: 0.25rem;
+    }
+
+    .editor-layout {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 2.5rem;
+      align-items: start;
+    }
+
+    /* Left Side: Form Edit Panel */
+    .edit-panel {
+      background-color: var(--bg-surface);
+      border: 1px solid var(--border-color);
+      border-radius: 16px;
+      padding: 2rem;
+    }
+
+    .edit-panel-section-title {
+      font-family: 'Outfit', sans-serif;
+      font-size: 1.125rem;
+      font-weight: 600;
+      margin-bottom: 1.25rem;
+      border-bottom: 1px solid var(--border-color);
+      padding-bottom: 0.5rem;
+    }
+
+    .form-row {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 1rem;
+    }
+
+    /* Dropdown Styles */
+    .select-field {
+      width: 100%;
+      background-color: rgba(0, 0, 0, 0.2);
+      border: 1px solid var(--border-color);
+      color: var(--text-primary);
+      padding: 0.75rem 1rem;
+      border-radius: 8px;
+      font-family: inherit;
+      font-size: 0.875rem;
+      outline: none;
+      cursor: pointer;
+      appearance: none;
+      background-image: url("data:image/svg+xml;charset=utf-8,%3Csvg xmlns='http://www.w3.org/2000/svg' fill='none' viewBox='0 0 20 20'%3E%3Cpath stroke='%239ca3af' stroke-linecap='round' stroke-linejoin='round' stroke-width='1.5' d='M6 8l4 4 4-4'/%3E%3C/svg%3E");
+      background-position: right 0.75rem center;
+      background-size: 1.25rem;
+      background-repeat: no-repeat;
+      padding-right: 2.5rem;
+      transition: all 0.2s;
+    }
+
+    .select-field:focus {
+      border-color: var(--accent);
+    }
+
+    .select-field option {
+      background-color: var(--bg-surface);
+      color: var(--text-primary);
+    }
+
+    /* Uploader & Feature Image Section */
+    .image-upload-area {
+      border: 2px dashed var(--border-color);
+      border-radius: 8px;
+      padding: 1.5rem;
+      text-align: center;
+      cursor: pointer;
+      transition: all 0.2s;
+      background-color: rgba(0, 0, 0, 0.1);
+      position: relative;
+    }
+
+    .image-upload-area:hover {
+      border-color: var(--accent);
+      background-color: rgba(99, 102, 241, 0.03);
+    }
+
+    .image-upload-area input[type="file"] {
+      position: absolute;
+      top: 0;
+      left: 0;
+      width: 100%;
+      height: 100%;
+      opacity: 0;
+      cursor: pointer;
+    }
+
+    .image-preview-container {
+      margin-top: 1rem;
+      position: relative;
+      border-radius: 8px;
+      overflow: hidden;
+      aspect-ratio: 16/9;
+      border: 1px solid var(--border-color);
+      background-color: #000;
+      display: none;
+    }
+
+    .image-preview-container img {
+      width: 100%;
+      height: 100%;
+      object-fit: cover;
+    }
+
+    .image-upload-placeholder {
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      gap: 0.5rem;
+      color: var(--text-secondary);
+    }
+
+    .image-upload-placeholder svg {
+      width: 32px;
+      height: 32px;
+      color: var(--text-muted);
+    }
+
+    .image-upload-label {
+      font-size: 0.875rem;
+      font-weight: 600;
+      color: var(--accent);
+    }
+
+    .image-upload-subtext {
+      font-size: 0.75rem;
+      color: var(--text-muted);
+    }
+
+    /* Right Side: Live Article Preview */
+    .preview-panel {
+      position: sticky;
+      top: 100px;
+      height: calc(100vh - 160px);
+      display: flex;
+      flex-direction: column;
+    }
+
+    .preview-panel-header {
+      font-family: 'Outfit', sans-serif;
+      font-size: 1.125rem;
+      font-weight: 600;
+      margin-bottom: 1rem;
+      display: flex;
+      align-items: center;
+      gap: 0.5rem;
+    }
+
+    .preview-panel-header span {
+      background-color: rgba(99, 102, 241, 0.1);
+      color: var(--accent);
+      font-size: 0.75rem;
+      font-weight: 700;
+      padding: 0.25rem 0.5rem;
+      border-radius: 4px;
+      text-transform: uppercase;
+      letter-spacing: 0.05em;
+    }
+
+    .preview-container {
+      flex: 1;
+      background-color: #ffffff;
+      color: #1f2937; /* Clean light text for absolute readability */
+      border-radius: 16px;
+      border: 1px solid var(--border-color);
+      padding: 2.5rem;
+      overflow-y: auto;
+      box-shadow: 0 10px 25px -5px rgba(0, 0, 0, 0.3);
+    }
+
+    /* Article Preview Rendering Typography styles */
+    .preview-art-header {
+      margin-bottom: 2rem;
+      padding-bottom: 1.5rem;
+      border-bottom: 1px solid #e5e7eb;
+    }
+
+    .preview-art-meta {
+      display: flex;
+      align-items: center;
+      gap: 0.75rem;
+      font-size: 0.875rem;
+      color: #6b7280;
+      margin-bottom: 0.75rem;
+      font-weight: 500;
+    }
+
+    .preview-art-category {
+      background-color: #f3f4f6;
+      padding: 0.25rem 0.625rem;
+      border-radius: 6px;
+      text-transform: uppercase;
+      font-size: 0.75rem;
+      font-weight: 700;
+      letter-spacing: 0.02em;
+    }
+
+    .preview-art-title {
+      font-family: 'Outfit', sans-serif;
+      font-size: 2rem;
+      font-weight: 800;
+      line-height: 1.25;
+      color: #111827;
+      margin-bottom: 1rem;
+    }
+
+    .preview-art-author-info {
+      display: flex;
+      align-items: center;
+      gap: 0.5rem;
+      font-size: 0.875rem;
+      color: #4b5563;
+    }
+
+    .preview-art-author-info strong {
+      color: #111827;
+    }
+
+    .preview-art-featured-image {
+      width: 100%;
+      max-height: 280px;
+      object-fit: cover;
+      border-radius: 8px;
+      margin-bottom: 2rem;
+      display: none;
+    }
+
+    .preview-art-body {
+      font-size: 1.05rem;
+      line-height: 1.7;
+    }
+
+    .preview-art-body h2 {
+      font-family: 'Outfit', sans-serif;
+      font-size: 1.45rem;
+      font-weight: 700;
+      color: #111827;
+      margin: 2rem 0 1rem 0;
+    }
+
+    .preview-art-body h3 {
+      font-family: 'Outfit', sans-serif;
+      font-size: 1.2rem;
+      font-weight: 700;
+      color: #1f2937;
+      margin: 1.5rem 0 0.75rem 0;
+    }
+
+    .preview-art-body p {
+      margin-bottom: 1.25rem;
+      color: #374151;
+    }
+
+    .preview-art-body blockquote {
+      border-left: 4px solid var(--accent);
+      padding: 0.75rem 1.25rem;
+      margin: 1.5rem 0;
+      background-color: #f9fafb;
+      border-radius: 0 8px 8px 0;
+    }
+
+    .preview-art-body blockquote p {
+      font-style: italic;
+      color: #111827;
+      margin-bottom: 0.5rem;
+    }
+
+    .preview-art-body blockquote cite {
+      font-size: 0.875rem;
+      color: #6b7280;
+      display: block;
+      font-style: normal;
+      font-weight: 500;
+    }
+
+    .preview-art-body ul, .preview-art-body ol {
+      margin: 1.25rem 0 1.25rem 1.5rem;
+    }
+
+    .preview-art-body li {
+      margin-bottom: 0.5rem;
+      color: #374151;
+    }
+
+    /* Sticky Editor Footer Actions */
+    .editor-footer {
+      margin-top: 2rem;
+      display: flex;
+      justify-content: flex-end;
+      gap: 1rem;
+      border-top: 1px solid var(--border-color);
+      padding-top: 1.5rem;
+    }
+
+    /* Card Preview (mini block in details layout to display color tint) */
+    .card-preview-bar {
+      height: 6px;
+      border-radius: 3px 3px 0 0;
+      width: 100%;
+      position: absolute;
+      top: 0;
+      left: 0;
+    }
+
+    /* Apply tints dynamically */
+    .tint-sky-preview { background-color: var(--tint-sky); }
+    .tint-peach-preview { background-color: var(--tint-peach); }
+    .tint-mint-preview { background-color: var(--tint-mint); }
+    .tint-lilac-preview { background-color: var(--tint-lilac); }
+
+    /* Keyframes */
+    @keyframes slideDown {
+      from { transform: translateY(-10px); opacity: 0; }
+      to { transform: translateY(0); opacity: 1; }
+    }
+
+    /* Utility Spinner */
+    .spinner {
+      border: 3px solid rgba(255, 255, 255, 0.1);
+      width: 20px;
+      height: 20px;
+      border-radius: 50%;
+      border-left-color: var(--accent);
+      animation: spin 1s linear infinite;
+      display: inline-block;
+      vertical-align: middle;
+    }
+
+    @keyframes spin {
+      0% { transform: rotate(0deg); }
+      100% { transform: rotate(360deg); }
+    }
+  </style>
+</head>
+<body>
+
+  <!-- Header -->
+  <header>
+    <div class="logo-container">
+      <div class="logo-badge"></div>
+      <div class="logo-text">Melsoft Academy</div>
+      <div class="logo-subtitle">| Draft Review Console</div>
+    </div>
+    
+    <div class="nav-actions">
+      <!-- Action buttons dynamically shown on auth state -->
+      <span id="user-display-email" style="font-size: 0.875rem; color: var(--text-secondary); display: none;"></span>
+      <button type="button" id="logout-btn" class="btn btn-secondary" style="display: none;">Log out</button>
+    </div>
+  </header>
+
+  <!-- Status banner for feedback messages -->
+  <div id="status-banner" class="status-banner">
+    <span id="status-banner-text"></span>
+  </div>
+
+  <main>
+    
+    <!-- 1. LOGIN VIEW -->
+    <div id="login-view" class="view-container">
+      <div class="login-card">
+        <div class="login-header">
+          <h2>Sign In</h2>
+          <p>Please enter your admin credentials to access draft reviews</p>
+        </div>
+        <form id="login-form" onsubmit="handleLogin(event)">
+          <div class="form-group">
+            <label for="login-email">Email Address</label>
+            <input type="email" id="login-email" class="input-field" placeholder="admin@melsoft.co.za" required>
+          </div>
+          <div class="form-group">
+            <label for="login-password">Password</label>
+            <input type="password" id="login-password" class="input-field" placeholder="••••••••" required>
+          </div>
+          <button type="submit" id="login-submit-btn" class="btn btn-primary" style="width: 100%; margin-top: 1rem;">
+            Log in
+          </button>
+        </form>
+      </div>
+    </div>
+
+    <!-- 2. DRAFT LIST VIEW -->
+    <div id="list-view" class="view-container">
+      <div class="list-header">
+        <h2>Pending Drafts</h2>
+        <div style="display: flex; gap: 0.75rem;">
+          <button type="button" id="refresh-btn" class="btn btn-secondary" onclick="loadDrafts(event)">
+            <svg width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path d="M4 4v5h.582m15.356 2A8.001 8.001 0 1121.21 8H18" stroke-linecap="round" stroke-linejoin="round"/></svg>
+            Refresh
+          </button>
+        </div>
+      </div>
+      
+      <div id="drafts-loading" style="text-align: center; padding: 3rem; display: none;">
+        <div class="spinner"></div>
+        <p style="margin-top: 1rem; color: var(--text-secondary);">Loading drafts from Supabase...</p>
+      </div>
+
+      <div id="drafts-list" class="drafts-grid">
+        <!-- Draft cards will be rendered here dynamically -->
+      </div>
+      
+      <div id="drafts-empty" class="empty-state" style="display: none;">
+        <div class="empty-state-title">No pending drafts</div>
+        <p class="empty-state-desc">All generated blog posts have been successfully reviewed or published.</p>
+      </div>
+    </div>
+
+    <!-- 3. DRAFT DETAIL / EDIT VIEW -->
+    <div id="detail-view" class="view-container">
+      <div class="editor-header">
+        <button type="button" class="btn btn-secondary" onclick="showListView(event)">
+          <svg width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path d="M15 19l-7-7 7-7" stroke-linecap="round" stroke-linejoin="round"/></svg>
+          Back to list
+        </button>
+        <div class="editor-header-title">
+          <h2 id="editor-title-text">Edit Draft</h2>
+          <p id="editor-subtitle-text" style="color: var(--text-muted); font-size: 0.875rem;"></p>
+        </div>
+      </div>
+
+      <div class="editor-layout">
+        
+        <!-- Left Side: Form edit panel -->
+        <div class="edit-panel">
+          <div class="edit-panel-section-title font-sans">Article Metadata</div>
+          
+          <div class="form-group">
+            <label for="edit-title">Article Title</label>
+            <input type="text" id="edit-title" class="input-field" placeholder="Enter title" oninput="updateLivePreview()">
+          </div>
+
+          <div class="form-group">
+            <label for="edit-excerpt">Excerpt / Meta Description</label>
+            <textarea id="edit-excerpt" class="input-field" placeholder="Enter meta description summary..." oninput="updateLivePreview()"></textarea>
+          </div>
+
+          <div class="form-row">
+            <div class="form-group">
+              <label for="edit-category">Category</label>
+              <input type="text" id="edit-category" class="input-field" placeholder="e.g. Careers, Technology" oninput="updateLivePreview()">
+            </div>
+            
+            <div class="form-group">
+              <label for="edit-post-date">Display date</label>
+              <input type="text" id="edit-post-date" class="input-field" placeholder="e.g. Apr 28, 2026" oninput="updateLivePreview()">
+            </div>
+          </div>
+
+          <div class="form-row">
+            <div class="form-group">
+              <label for="edit-author">Author Name</label>
+              <input type="text" id="edit-author" class="input-field" placeholder="e.g. Sipho Nkosi" oninput="updateLivePreview()">
+            </div>
+            
+            <div class="form-group">
+              <label for="edit-author-role">Author Role</label>
+              <input type="text" id="edit-author-role" class="input-field" placeholder="e.g. Head of Data Science" oninput="updateLivePreview()">
+            </div>
+          </div>
+
+          <div class="form-group">
+            <label for="edit-tint">Card colour (Card Tint)</label>
+            <select id="edit-tint" class="select-field" onchange="updateLivePreview()">
+              <option value="var(--tint-sky)">Sky Blue (Sky)</option>
+              <option value="var(--tint-peach)">Peach Orange (Peach)</option>
+              <option value="var(--tint-mint)">Mint Green (Mint)</option>
+              <option value="var(--tint-lilac)">Lilac Purple (Lilac)</option>
+            </select>
+          </div>
+
+          <div class="edit-panel-section-title" style="margin-top: 2rem;">Featured Image</div>
+          <div class="form-group">
+            <div class="image-upload-area">
+              <input type="file" id="edit-image-file" accept="image/*" onchange="handleImageUpload(event)">
+              <div class="image-upload-placeholder" id="upload-placeholder">
+                <svg fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path d="M4 16l4.586-4.586a2 2 0 012.828 0L16 16m-2-2l1.586-1.586a2 2 0 012.828 0L20 14m-6-6h.01M6 20h12a2 2 0 002-2V6a2 2 0 00-2-2H6a2 2 0 00-2 2v12a2 2 0 002 2z" stroke-linecap="round" stroke-linejoin="round"/></svg>
+                <div class="image-upload-label">Upload Featured Image</div>
+                <div class="image-upload-subtext">Click or drag and drop PNG, JPG, or WEBP</div>
+              </div>
+              <div id="image-upload-progress" style="display: none; color: var(--text-secondary); font-size: 0.875rem; margin-top: 0.5rem;">
+                <div class="spinner" style="margin-right: 0.5rem;"></div> Uploading to Supabase Storage...
+              </div>
+            </div>
+            
+            <div class="image-preview-container" id="image-preview-container">
+              <img id="image-preview-img" src="" alt="Feature preview">
+            </div>
+          </div>
+
+          <!-- Bottom form actions -->
+          <div class="editor-footer">
+            <button type="button" id="save-btn" class="btn btn-primary" onclick="saveDraftChanges(event)">
+              Save changes
+            </button>
+            <button type="button" id="publish-btn" class="btn btn-secondary" onclick="publishDraft(event)">
+              Publish
+            </button>
+          </div>
+        </div>
+
+        <!-- Right Side: Live Article Preview -->
+        <div class="preview-panel">
+          <div class="preview-panel-header">
+            Live Preview <span>Canvas</span>
+          </div>
+          <div class="preview-container" id="article-preview-container">
+            <div class="preview-art-header">
+              <div class="preview-art-meta">
+                <span id="preview-meta-category" class="preview-art-category">Category</span>
+                <span>•</span>
+                <span id="preview-meta-date">Date</span>
+              </div>
+              <h1 id="preview-art-title-text" class="preview-art-title">Article Title</h1>
+              <div class="preview-art-author-info">
+                By <strong id="preview-author-name">Author</strong>, <span id="preview-author-role">Role</span>
+              </div>
+            </div>
+            
+            <img id="preview-featured-image-img" class="preview-art-featured-image" src="" alt="Featured image">
+            
+            <div id="preview-art-body-container" class="preview-art-body">
+              <!-- Rendered blocks go here -->
+            </div>
+          </div>
+        </div>
+
+      </div>
+    </div>
+
+  </main>
+
+  <script>
+    // ----------------------------------------------------
+    // Supabase Configuration & Client Initialization
+    // ----------------------------------------------------
+    const SUPABASE_URL = "https://pknwpdtauqrfcfiyfldi.supabase.co";
+    const SUPABASE_ANON_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InBrbndwZHRhdXFyZmNmaXlmbGRpIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODM2MTkyNTcsImV4cCI6MjA5OTE5NTI1N30.X36FCeLOpYrvsgUAFaf83-8mX8_Fmf_XAsETCB167S4";
+
+    let supabaseClient = null;
+    let currentSession = null;
+    let currentDraftId = null;
+    let currentDraftBodyBlocks = [];
+    let currentUploadedImageUrl = '';
+
+    // Initialize Supabase
+    try {
+      if (SUPABASE_ANON_KEY !== "<<PASTE_ANON_KEY_PLACEHOLDER>>") {
+        supabaseClient = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
+      } else {
+        showStatus('Configuration required: Please paste your real Supabase ANON key into public/dashboard.html line 493.', 'error', 0);
+      }
+    } catch (err) {
+      showStatus('Failed to initialize Supabase client: ' + err.message, 'error', 0);
+    }
+
+    // On Load Lifecycle
+    window.addEventListener('DOMContentLoaded', async () => {
+      if (!supabaseClient) return;
+
+      try {
+        const { data: { session }, error } = await supabaseClient.auth.getSession();
+        if (error) throw error;
+        
+        if (session) {
+          handleAuthSuccess(session);
+        } else {
+          showView('login-view');
+        }
+      } catch (err) {
+        showStatus('Session retrieval failed: ' + err.message, 'error');
+        showView('login-view');
+      }
+
+      // Listen for auth changes
+      supabaseClient.auth.onAuthStateChange((event, session) => {
+        if (session) {
+          handleAuthSuccess(session);
+        } else {
+          handleAuthLoggedOut();
+        }
+      });
+    });
+
+    // Sign out logic
+    document.getElementById('logout-btn').addEventListener('click', async (e) => {
+      if (e) e.preventDefault();
+      try {
+        const { error } = await supabaseClient.auth.signOut();
+        if (error) throw error;
+      } catch (err) {
+        showStatus('Signout failed: ' + err.message, 'error');
+      }
+    });
+
+    // ----------------------------------------------------
+    // View Management
+    // ----------------------------------------------------
+    function showView(viewId) {
+      document.querySelectorAll('.view-container').forEach(el => {
+        el.classList.remove('active');
+      });
+      document.getElementById(viewId).classList.add('active');
+
+      // Header links display context
+      const isLogin = (viewId === 'login-view');
+      document.getElementById('logout-btn').style.display = isLogin ? 'none' : 'flex';
+      document.getElementById('user-display-email').style.display = isLogin ? 'none' : 'block';
+    }
+
+    function handleAuthSuccess(session) {
+      currentSession = session;
+      document.getElementById('user-display-email').textContent = session.user.email;
+      showView('list-view');
+      loadDrafts();
+    }
+
+    function handleAuthLoggedOut() {
+      currentSession = null;
+      document.getElementById('user-display-email').textContent = '';
+      showView('login-view');
+    }
+
+    // ----------------------------------------------------
+    // Status Banner / Feedback Messages
+    // ----------------------------------------------------
+    function showStatus(message, type = 'success', duration = 5000) {
+      const banner = document.getElementById('status-banner');
+      const text = document.getElementById('status-banner-text');
+      
+      banner.className = 'status-banner ' + type;
+      text.textContent = message;
+      
+      if (duration > 0) {
+        setTimeout(() => {
+          if (banner.className.includes(type) && text.textContent === message) {
+            banner.style.display = 'none';
+          }
+        }, duration);
+      }
+    }
+
+    // ----------------------------------------------------
+    // Auth - Sign In
+    // ----------------------------------------------------
+    async function handleLogin(e) {
+      e.preventDefault();
+      if (!supabaseClient) return;
+
+      const email = document.getElementById('login-email').value.trim();
+      const password = document.getElementById('login-password').value;
+      const submitBtn = document.getElementById('login-submit-btn');
+
+      try {
+        submitBtn.disabled = true;
+        submitBtn.innerHTML = '<div class="spinner"></div> Logging in...';
+
+        const { data, error } = await supabaseClient.auth.signInWithPassword({
+          email,
+          password
+        });
+
+        if (error) throw error;
+        
+        // signInWithPassword automatically triggers onAuthStateChange, handling view redirect
+        showStatus('Logged in successfully', 'success');
+      } catch (err) {
+        showStatus('Authentication failed: ' + err.message, 'error');
+      } finally {
+        submitBtn.disabled = false;
+        submitBtn.innerHTML = 'Log in';
+      }
+    }
+
+    // ----------------------------------------------------
+    // List View Operations
+    // ----------------------------------------------------
+    async function loadDrafts(e) {
+      if (e) e.preventDefault();
+      if (!supabaseClient) return;
+
+      const grid = document.getElementById('drafts-list');
+      const loader = document.getElementById('drafts-loading');
+      const emptyState = document.getElementById('drafts-empty');
+
+      grid.innerHTML = '';
+      emptyState.style.display = 'none';
+      loader.style.display = 'block';
+
+      try {
+        const { data, error } = await supabaseClient
+          .from('posts')
+          .select('id, title, excerpt, created_at, status, tint')
+          .eq('status', 'draft')
+          .order('created_at', { ascending: false });
+
+        if (error) throw error;
+
+        if (!data || data.length === 0) {
+          emptyState.style.display = 'block';
+          return;
+        }
+
+        data.forEach(post => {
+          // Format Date
+          const dateStr = new Date(post.created_at).toLocaleDateString('en-ZA', {
+            year: 'numeric',
+            month: 'short',
+            day: 'numeric'
+          });
+
+          // Determine card tint indicator
+          const rawTint = post.tint || 'var(--tint-sky)';
+          let tintClass = 'tint-sky-preview';
+          if (rawTint.includes('peach')) tintClass = 'tint-peach-preview';
+          else if (rawTint.includes('mint')) tintClass = 'tint-mint-preview';
+          else if (rawTint.includes('lilac')) tintClass = 'tint-lilac-preview';
+
+          const card = document.createElement('div');
+          card.className = 'draft-card';
+          card.innerHTML = `
+            <div class="card-preview-bar ${tintClass}"></div>
+            <div class="draft-card-header">
+              <span class="draft-card-date">${dateStr}</span>
+            </div>
+            <h3 class="draft-card-title">${escapeHTML(post.title || 'Untitled Post')}</h3>
+            <p class="draft-card-excerpt">${escapeHTML(post.excerpt || 'No excerpt summary provided.')}</p>
+            <div class="draft-card-actions">
+              <button type="button" class="btn btn-secondary btn-sm" onclick="openDraft(event, '${post.id}')">
+                Open / Review
+              </button>
+            </div>
+          `;
+          grid.appendChild(card);
+        });
+
+      } catch (err) {
+        showStatus('Failed to load drafts: ' + err.message, 'error');
+      } finally {
+        loader.style.display = 'none';
+      }
+    }
+
+    // ----------------------------------------------------
+    // Detail / Edit View Operations
+    // ----------------------------------------------------
+    async function openDraft(e, draftId) {
+      if (e) e.preventDefault();
+      if (!supabaseClient) return;
+
+      currentDraftId = draftId;
+      showStatus('Loading draft details...', 'success', 2000);
+
+      try {
+        const { data, error } = await supabaseClient
+          .from('posts')
+          .select('*')
+          .eq('id', draftId)
+          .single();
+
+        if (error) throw error;
+
+        // Set state properties
+        currentDraftBodyBlocks = data.body || [];
+        currentUploadedImageUrl = data.image || '';
+
+        // Fill form fields
+        document.getElementById('edit-title').value = data.title || '';
+        document.getElementById('edit-excerpt').value = data.excerpt || '';
+        document.getElementById('edit-category').value = data.category || '';
+        document.getElementById('edit-post-date').value = data.post_date || '';
+        document.getElementById('edit-author').value = data.author || '';
+        document.getElementById('edit-author-role').value = data.author_role || '';
+        
+        // Select correct tint
+        const tintSelect = document.getElementById('edit-tint');
+        if (data.tint) {
+          tintSelect.value = data.tint;
+        } else {
+          tintSelect.value = 'var(--tint-sky)';
+        }
+
+        // Subtitle tracking
+        document.getElementById('editor-title-text').textContent = 'Review Draft';
+        document.getElementById('editor-subtitle-text').textContent = `Draft ID: ${data.id} | Slug: ${data.slug}`;
+
+        // Preview images
+        const prevContainer = document.getElementById('image-preview-container');
+        const prevImg = document.getElementById('image-preview-img');
+        const uPlaceholder = document.getElementById('upload-placeholder');
+        
+        if (currentUploadedImageUrl) {
+          prevImg.src = currentUploadedImageUrl;
+          prevContainer.style.display = 'block';
+          uPlaceholder.style.display = 'none';
+        } else {
+          prevContainer.style.display = 'none';
+          uPlaceholder.style.display = 'flex';
+          prevImg.src = '';
+        }
+
+        // Trigger Live Preview Update
+        updateLivePreview();
+        showView('detail-view');
+
+      } catch (err) {
+        showStatus('Failed to load draft detail: ' + err.message, 'error');
+      }
+    }
+
+    function showListView(e) {
+      if (e) e.preventDefault();
+      currentDraftId = null;
+      currentDraftBodyBlocks = [];
+      currentUploadedImageUrl = '';
+      showView('list-view');
+      loadDrafts();
+    }
+
+    // ----------------------------------------------------
+    // Live Article Rendering / Preview Canvas Updates
+    // ----------------------------------------------------
+    function updateLivePreview() {
+      // Fetch current input values
+      const title = document.getElementById('edit-title').value;
+      const excerpt = document.getElementById('edit-excerpt').value;
+      const category = document.getElementById('edit-category').value;
+      const postDate = document.getElementById('edit-post-date').value;
+      const author = document.getElementById('edit-author').value;
+      const authorRole = document.getElementById('edit-author-role').value;
+      
+      // Update article header preview values
+      document.getElementById('preview-art-title-text').textContent = title || 'Untitled Post';
+      document.getElementById('preview-meta-category').textContent = category || 'Uncategorised';
+      document.getElementById('preview-meta-date').textContent = postDate || 'Publishing Date';
+      document.getElementById('preview-author-name').textContent = author || 'Anonymous';
+      document.getElementById('preview-author-role').textContent = authorRole || 'Writer';
+
+      // Update Featured image display in canvas
+      const featuredImg = document.getElementById('preview-featured-image-img');
+      if (currentUploadedImageUrl) {
+        featuredImg.src = currentUploadedImageUrl;
+        featuredImg.style.display = 'block';
+      } else {
+        featuredImg.style.display = 'none';
+        featuredImg.src = '';
+      }
+
+      // Render body blocks
+      const bodyContainer = document.getElementById('preview-art-body-container');
+      bodyContainer.innerHTML = '';
+
+      if (!currentDraftBodyBlocks || currentDraftBodyBlocks.length === 0) {
+        bodyContainer.innerHTML = '<p style="color: #9ca3af; font-style: italic;">No article body content generated.</p>';
+        return;
+      }
+
+      currentDraftBodyBlocks.forEach(block => {
+        let blockEl = null;
+
+        switch (block.type) {
+          case 'h2':
+            blockEl = document.createElement('h2');
+            blockEl.textContent = block.text;
+            break;
+          case 'h3':
+            blockEl = document.createElement('h3');
+            blockEl.textContent = block.text;
+            break;
+          case 'p':
+            blockEl = document.createElement('p');
+            blockEl.textContent = block.text;
+            break;
+          case 'quote':
+            blockEl = document.createElement('blockquote');
+            const quoteP = document.createElement('p');
+            quoteP.textContent = block.text;
+            blockEl.appendChild(quoteP);
+            
+            if (block.who) {
+              const cite = document.createElement('cite');
+              cite.textContent = `— ${block.who}`;
+              blockEl.appendChild(cite);
+            }
+            break;
+          case 'ul':
+            blockEl = document.createElement('ul');
+            if (block.items) {
+              block.items.forEach(item => {
+                const li = document.createElement('li');
+                li.textContent = item;
+                blockEl.appendChild(li);
+              });
+            }
+            break;
+          case 'ol':
+            blockEl = document.createElement('ol');
+            if (block.items) {
+              block.items.forEach(item => {
+                const li = document.createElement('li');
+                li.textContent = item;
+                blockEl.appendChild(li);
+              });
+            }
+            break;
+        }
+
+        if (blockEl) {
+          bodyContainer.appendChild(blockEl);
+        }
+      });
+    }
+
+    // ----------------------------------------------------
+    // File Storage Upload
+    // ----------------------------------------------------
+    async function handleImageUpload(e) {
+      if (e) e.preventDefault();
+      if (!supabaseClient || !currentDraftId) return;
+
+      const file = e.target.files[0];
+      if (!file) return;
+
+      const uploaderArea = document.getElementById('upload-placeholder');
+      const uploaderProgress = document.getElementById('image-upload-progress');
+      const previewContainer = document.getElementById('image-preview-container');
+      const previewImg = document.getElementById('image-preview-img');
+
+      try {
+        uploaderArea.style.display = 'none';
+        uploaderProgress.style.display = 'block';
+
+        // Prepare file name: sanitise spaces to hyphens
+        const sanitisedName = file.name.replace(/\s+/g, '-');
+        const fileName = `${currentDraftId}-${Date.now()}-${sanitisedName}`;
+
+        console.log(`[Storage Upload] Uploading ${fileName} to bucket 'blog-images'...`);
+        const { data, error } = await supabaseClient.storage
+          .from('blog-images')
+          .upload(fileName, file);
+
+        if (error) throw error;
+
+        // Fetch Public URL
+        const { data: urlData } = supabaseClient.storage
+          .from('blog-images')
+          .getPublicUrl(fileName);
+
+        if (!urlData || !urlData.publicUrl) {
+          throw new Error('Failed to retrieve uploaded image public URL.');
+        }
+
+        currentUploadedImageUrl = urlData.publicUrl;
+        console.log(`[Storage Upload] Success. URL: ${currentUploadedImageUrl}`);
+
+        // Update previews
+        previewImg.src = currentUploadedImageUrl;
+        previewContainer.style.display = 'block';
+        
+        updateLivePreview();
+        showStatus('Image uploaded successfully', 'success');
+
+      } catch (err) {
+        showStatus('Image upload failed: ' + err.message, 'error');
+        uploaderArea.style.display = 'flex';
+      } finally {
+        uploaderProgress.style.display = 'none';
+      }
+    }
+
+    // ----------------------------------------------------
+    // Database Save Operations
+    // ----------------------------------------------------
+    async function saveDraftChanges(e) {
+      if (e) e.preventDefault();
+      if (!supabaseClient || !currentDraftId) return;
+
+      const saveBtn = document.getElementById('save-btn');
+      
+      const title = document.getElementById('edit-title').value.trim();
+      const excerpt = document.getElementById('edit-excerpt').value.trim();
+      const category = document.getElementById('edit-category').value.trim();
+      const postDate = document.getElementById('edit-post-date').value.trim();
+      const author = document.getElementById('edit-author').value.trim();
+      const authorRole = document.getElementById('edit-author-role').value.trim();
+      const tint = document.getElementById('edit-tint').value;
+
+      try {
+        saveBtn.disabled = true;
+        saveBtn.innerHTML = '<div class="spinner"></div> Saving...';
+
+        const updateData = {
+          title,
+          excerpt,
+          category,
+          post_date: postDate,
+          author,
+          author_role: authorRole,
+          tint,
+          image: currentUploadedImageUrl
+        };
+
+        const { data, error } = await supabaseClient
+          .from('posts')
+          .update(updateData)
+          .eq('id', currentDraftId);
+
+        if (error) throw error;
+
+        showStatus('Changes saved successfully', 'success');
+
+      } catch (err) {
+        showStatus('Failed to save changes: ' + err.message, 'error');
+      } finally {
+        saveBtn.disabled = false;
+        saveBtn.innerHTML = 'Save changes';
+      }
+    }
+
+    async function publishDraft(e) {
+      if (e) e.preventDefault();
+      if (!supabaseClient || !currentDraftId) return;
+
+      if (!confirm("Publish this post to the preview site?")) {
+        return;
+      }
+
+      const publishBtn = document.getElementById('publish-btn');
+
+      try {
+        publishBtn.disabled = true;
+        publishBtn.innerHTML = '<div class="spinner"></div> Publishing...';
+
+        const response = await fetch('/api/publish', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json'
+          },
+          body: JSON.stringify({ draftId: currentDraftId })
+        });
+
+        const result = await response.json();
+
+        if (!response.ok) {
+          throw new Error(result.details || result.error || 'Failed to publish');
+        }
+
+        showStatus('Post successfully published! It now appears on the local /blog-preview page.', 'success');
+        
+        // Return to draft list after a brief delay
+        setTimeout(() => {
+          showListView(e);
+        }, 2000);
+
+      } catch (err) {
+        showStatus('Publishing failed: ' + err.message, 'error');
+      } finally {
+        publishBtn.disabled = false;
+        publishBtn.innerHTML = 'Publish';
+      }
+    }
+
+    // ----------------------------------------------------
+    // Drag & Drop event prevention
+    // ----------------------------------------------------
+    // Prevent default drag and drop actions globally to stop browser from navigating to dropped images
+    document.addEventListener('dragover', (e) => e.preventDefault());
+    document.addEventListener('drop', (e) => e.preventDefault());
+
+    // ----------------------------------------------------
+    // Utilities
+    // ----------------------------------------------------
+    function escapeHTML(str) {
+      if (!str) return '';
+      return str.replace(/[&<>'"]/g, 
+        tag => ({
+          '&': '&amp;',
+          '<': '&lt;',
+          '>': '&gt;',
+          "'": '&#39;',
+          '"': '&quot;'
+        }[tag] || tag)
+      );
+    }
+  </script>
+</body>
+</html>
