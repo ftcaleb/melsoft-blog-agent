@@ -5,6 +5,7 @@ import { fileURLToPath } from 'url';
 import path from 'path';
 import fs from 'fs/promises';
 import { jsonrepair } from 'jsonrepair';
+import { logAnthropicUsage } from './usage.js';
 
 // Load environment variables
 dotenv.config();
@@ -66,7 +67,10 @@ export async function writePost(topic) {
     6. NO INVENTED STATISTICS: Every statistic or figure you use must be fact-checked and verified using the web_search tool against a real, current source. You must attribute all statistics inline (e.g., "according to [Source]"). If a statistic cannot be verified via search, do not include it. Skip it entirely rather than making an estimate or guess.
     7. TONAL PRINCIPLE: Ensure a reader who has absolutely no intention of buying from Melsoft still finds the post highly valuable, informative, and objective.
     8. CURRENT DATE AWARENESS: The current date is July 2026. Any year references in the title or body (e.g. "2026 guide," current statistics, "as of [year]") must be consistent with that, not an earlier year (like 2025), unless referring to a historical data point from a cited source (which is fine and should keep its real source year).
-    
+    9. NO TABLES: Never use markdown tables. Present comparisons or structured data as bulleted lists instead.
+    10. NO EMOJI: Never use emoji anywhere in the post, including checkmarks like ✅.
+    11. NO LINKS OR PLACEHOLDERS: Never include markdown hyperlinks or square-bracketed placeholder text (like "[Explore our programmes...]"). Plain text only; refer to things by name.
+
     RESPONSE FORMAT:
     You must respond ONLY with a valid JSON object matching the following structure.
     Do NOT include markdown code fences (like \`\`\`json), preamble, explanations, or postscript.
@@ -80,13 +84,15 @@ export async function writePost(topic) {
   console.log(`[writePost] Querying Claude to write post for: "${topic.title}"...`);
 
   const response = await anthropic.messages.create({
-    model: 'claude-sonnet-4-6',
+    model: 'claude-haiku-4-5-20251001',
     max_tokens: 8000,
-    tools: [{ type: 'web_search_20250305', name: 'web_search' }],
+    tools: [{ type: 'web_search_20250305', name: 'web_search', max_uses: 3 }],
     messages: [
       { role: 'user', content: promptText }
     ]
   });
+
+  logAnthropicUsage('writer', response);
 
   // Safely concatenate all text blocks in case of intermediate tool use blocks
   let responseText = response.content

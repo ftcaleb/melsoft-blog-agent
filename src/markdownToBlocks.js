@@ -85,9 +85,12 @@ function extractText(token) {
  * Converts a markdown string into a structured block array.
  *
  * @param {string} markdown - The markdown content to convert
+ * @param {string} [title] - The post title; if the body opens with a heading
+ *   that duplicates it, that leading heading is stripped so the page doesn't
+ *   render the title twice.
  * @returns {object[]} Array of blocks
  */
-export function markdownToBlocks(markdown) {
+export function markdownToBlocks(markdown, title = '') {
   if (!markdown) return [];
   
   const cleanedMarkdown = cleanMojibake(markdown);
@@ -112,25 +115,28 @@ export function markdownToBlocks(markdown) {
         break;
       }
       case 'blockquote': {
-        const quoteText = token.tokens 
-          ? token.tokens.map(t => extractText(t)).filter(Boolean).join('\n\n').trim() 
+        const rawQuoteText = token.tokens
+          ? token.tokens.map(t => extractText(t)).filter(Boolean).join('\n\n').trim()
           : (token.text || '').trim();
-        
+
+        // Clean the whole quote text FIRST, then split off the attribution.
+        // A mojibake-corrupted dash (e.g. "â€”") would otherwise defeat the
+        // attribution regex if the split ran on the raw text.
+        const quoteText = cleanMojibake(rawQuoteText);
         let text = quoteText;
         let who = '';
-        
+
         // If the quote text contains a trailing attribution line starting with —, --, or -, split it
         const lines = quoteText.split('\n');
         if (lines.length > 1) {
           const lastLine = lines[lines.length - 1].trim();
           const match = lastLine.match(/^(?:—|--|-)\s*(.+)$/);
           if (match) {
-            who = cleanMojibake(match[1].trim());
+            who = match[1].trim();
             text = lines.slice(0, -1).join('\n').trim();
           }
         }
-        
-        text = cleanMojibake(text);
+
         blocks.push({ type: 'quote', text, who });
         break;
       }
@@ -142,13 +148,50 @@ export function markdownToBlocks(markdown) {
         blocks.push({ type, items });
         break;
       }
+      case 'table': {
+        // The React renderer has no table block, so degrade to a bulleted list.
+        // Drop the header row; each body row becomes one item shaped as
+        // "<first cell>: <remaining cells joined with ' — '>". Inline bold/links
+        // flatten to plain text via the existing extract helpers.
+        const items = [];
+        for (const row of (token.rows || [])) {
+          const cells = row.map(cell => cleanMojibake(extractText(cell).trim()));
+          if (cells.every(cell => !cell)) continue; // skip empty rows
+          const [first, ...rest] = cells;
+          const tail = rest.filter(Boolean).join(' — ');
+          const item = tail ? `${first}: ${tail}` : first;
+          if (item) items.push(item);
+        }
+        if (items.length) {
+          blocks.push({ type: 'ul', items });
+        }
+        break;
+      }
+      case 'code': {
+        // Fenced code blocks have no dedicated block type; emit as a paragraph
+        // so the content is never silently lost.
+        blocks.push({ type: 'p', text: token.text });
+        break;
+      }
       // Horizontal rules (---) → dropped entirely (no block)
       case 'hr':
       default:
         break;
     }
   }
-  
+
+  // A3: strip a leading heading that merely repeats the post title, so the
+  // rendered page doesn't show the title twice. Only ever the first block.
+  if (title && blocks.length > 0) {
+    const first = blocks[0];
+    if (first.type === 'h2' || first.type === 'h3') {
+      const normalize = (s) => (s || '').toLowerCase().replace(/[^a-z0-9]/g, '');
+      if (normalize(first.text) === normalize(title)) {
+        blocks.shift();
+      }
+    }
+  }
+
   return blocks;
 }
 

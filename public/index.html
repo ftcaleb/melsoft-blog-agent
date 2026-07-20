@@ -6,33 +6,99 @@
   <title>Melsoft Blog Agent — Topic Approval</title>
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-  <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;500;600;700;800&family=Plus+Jakarta+Sans:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+  <link href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,500..700&family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
   <script src="https://cdnjs.cloudflare.com/ajax/libs/marked/9.1.6/marked.min.js"></script>
   <style>
+    /* ============================================================
+       PROTECTED — do not rename/remove (referenced by <script> JS).
+       IDs: loadingState, errorState, topicsGrid, successAlert, errorBtn,
+         errorMessage, errorTitle, postContainer
+       Classes via querySelector: loading-text, loading-subtext
+       JS className assignments: topics-grid, card
+       JS-generated innerHTML classes: card-top, badges-row, badge, badge-tech,
+         badge-skills, badge-recent, badge-evergreen, card-title, card-pitch,
+         card-bottom, source-notes, btn-select, success-confirmation
+       JS-set inline display values: loadingState=flex, errorState=block,
+         topicsGrid=flex, successAlert=none, postContainer=block
+       CSS custom properties consumed inside <script> innerHTML (kept as legacy
+         aliases below — do not remove): --success-green, --text-secondary,
+         --text-muted, --text-primary, --border-color, --accent-primary,
+         --badge-tech-text
+       ============================================================ */
     :root {
-      --bg-dark: #080c14;
-      --bg-card: rgba(17, 24, 39, 0.7);
-      --bg-card-hover: rgba(26, 36, 56, 0.85);
-      --border-color: rgba(255, 255, 255, 0.08);
-      --text-primary: #f3f4f6;
-      --text-secondary: #9ca3af;
-      --text-muted: #6b7280;
-      
-      /* Accent colors */
-      --accent-primary: #6366f1;
-      --accent-primary-glow: rgba(99, 102, 241, 0.15);
-      --success-green: #10b981;
-      --success-glow: rgba(16, 185, 129, 0.15);
+      /* ── Primitives — Melsoft Visual Brand Guide ─────────────── */
+      --ink: #0a1733;
+      --ink-deep: #060e22;
+      --ink-2: #1a2545;
+      --maroon: #5e0743;
+      --orange: #ff7300;
+      --purple: #720075;
 
-      /* Badge colors */
-      --badge-tech-bg: rgba(79, 70, 229, 0.15);
-      --badge-tech-text: #a5b4fc;
-      --badge-skills-bg: rgba(217, 70, 239, 0.15);
-      --badge-skills-text: #f5d0fe;
-      --badge-recent-bg: rgba(245, 158, 11, 0.15);
-      --badge-recent-text: #fde047;
-      --badge-evergreen-bg: rgba(16, 185, 129, 0.15);
-      --badge-evergreen-text: #6ee7b7;
+      --text-2: #5b6478;
+      --text-3: #8a93a8;
+      --line: #e5e8f0;
+      --line-2: #ccd2df;
+      --surface: #f7f8fb;
+      --surface-2: #eef1f7;
+      --bg: #ffffff;
+
+      /* Dark-console derivatives (used by the JS success confirmation panel) */
+      --d-bg: #060e22;
+      --d-surface: rgba(255, 255, 255, 0.03);
+      --d-surface-2: rgba(255, 255, 255, 0.06);
+      --d-line: rgba(255, 255, 255, 0.10);
+      --d-line-strong: rgba(255, 255, 255, 0.16);
+      --d-text: #eef1f7;
+      --d-text-2: rgba(255, 255, 255, 0.66);
+      --d-text-3: rgba(255, 255, 255, 0.45);
+
+      /* Approved brand gradients only */
+      --grad-ink: linear-gradient(120deg, #0a1733 0%, #5e0743 46%, #ff7300 100%);
+      --grad-ink-soft: linear-gradient(120deg, #720075 0%, #5e0743 55%, #ff7300 100%);
+      --grad-black-maroon: linear-gradient(135deg, #060e22 0%, #5e0743 100%);
+      --grad-black-purple: linear-gradient(135deg, #060e22 0%, #720075 100%);
+
+      /* Card tints — names frozen by data contract */
+      --tint-sky: #dde6f8;
+      --tint-peach: #ffe6d1;
+      --tint-mint: #d5efe2;
+      --tint-lilac: #eadbf6;
+
+      /* Radius & elevation */
+      --radius-sm: 12px;
+      --radius-md: 16px;
+      --radius-lg: 24px;
+      --radius-xl: 34px;
+      --rad-pill: 100px;
+      --shadow-soft: 0 6px 24px -12px rgba(10, 23, 51, 0.16);
+      --shadow-lifted: 0 26px 50px -20px rgba(10, 23, 51, 0.28);
+      --shadow-deep: 0 34px 80px -28px rgba(10, 23, 51, 0.42);
+
+      --ease-lift: cubic-bezier(0.16, 1, 0.3, 1);
+
+      /* Semantic status */
+      --status-success: #22c55e;
+      --status-success-soft: rgba(34, 197, 94, 0.12);
+      --status-success-ink: #15803d;   /* AA-legible green text on soft/light */
+      --status-error: #ef4444;
+      --status-error-soft: rgba(239, 68, 68, 0.12);
+      --status-error-ink: #b91c1c;     /* AA-legible red text on soft/light */
+
+      /* Font stacks */
+      --font-display: 'Fraunces', Georgia, 'Times New Roman', serif;
+      --font-body: 'Inter', system-ui, -apple-system, sans-serif;
+      --font-mono: ui-monospace, 'SFMono-Regular', Menlo, monospace;
+
+      /* Legacy aliases — consumed ONLY by the JS-injected success panel. It now
+         renders as a LIGHT editorial card (see .post-container), so these resolve
+         to light, AA-legible values. Do not remove. */
+      --text-primary: var(--ink);
+      --text-secondary: var(--text-2);
+      --text-muted: var(--text-2);
+      --border-color: var(--line-2);
+      --accent-primary: var(--orange);
+      --success-green: var(--status-success);
+      --badge-tech-text: var(--maroon);
     }
 
     * {
@@ -42,28 +108,29 @@
     }
 
     body {
-      font-family: 'Plus Jakarta Sans', sans-serif;
-      background-color: var(--bg-dark);
-      color: var(--text-primary);
+      font-family: var(--font-body);
+      background-color: var(--bg);
+      color: var(--ink);
       min-height: 100vh;
       display: flex;
       flex-direction: column;
       align-items: center;
-      padding: 3rem 1.5rem;
+      padding: 3.5rem 1.5rem;
       overflow-x: hidden;
       position: relative;
+      -webkit-font-smoothing: antialiased;
     }
 
-    /* Ambient glow circles */
+    /* Ambient warm brand wash behind the header */
     .glow-circle {
       position: absolute;
-      width: 500px;
-      height: 500px;
+      width: 640px;
+      height: 640px;
       border-radius: 50%;
-      background: radial-gradient(circle, var(--accent-primary-glow) 0%, rgba(8, 12, 20, 0) 70%);
-      top: -100px;
-      left: calc(50% - 250px);
-      z-index: 1;
+      background: radial-gradient(circle, rgba(255, 115, 0, 0.07) 0%, rgba(255, 255, 255, 0) 68%);
+      top: -180px;
+      left: calc(50% - 320px);
+      z-index: 0;
       pointer-events: none;
     }
 
@@ -80,22 +147,26 @@
     }
 
     header h1 {
-      font-family: 'Outfit', sans-serif;
-      font-size: 2.8rem;
-      font-weight: 800;
-      background: linear-gradient(135deg, #ffffff 40%, #a5b4fc 100%);
+      font-family: var(--font-display);
+      font-size: 3rem;
+      font-weight: 600;
+      letter-spacing: -0.02em;
+      line-height: 1.05;
+      color: var(--maroon);
+      background: var(--grad-ink);
       -webkit-background-clip: text;
+      background-clip: text;
       -webkit-text-fill-color: transparent;
-      margin-bottom: 0.75rem;
+      margin-bottom: 0.85rem;
     }
 
     header p {
-      color: var(--text-secondary);
-      font-size: 1.1rem;
+      color: var(--text-2);
+      font-size: 1.08rem;
       font-weight: 400;
       max-width: 600px;
       margin: 0 auto;
-      line-height: 1.5;
+      line-height: 1.6;
     }
 
     /* Loading state */
@@ -105,74 +176,81 @@
       align-items: center;
       justify-content: center;
       padding: 5rem 2rem;
-      background: var(--bg-card);
-      border: 1px solid var(--border-color);
-      border-radius: 20px;
-      backdrop-filter: blur(12px);
-      -webkit-backdrop-filter: blur(12px);
-      box-shadow: 0 10px 30px rgba(0, 0, 0, 0.2);
+      background: var(--surface);
+      border: 1px solid var(--line);
+      border-radius: var(--radius-lg);
+      box-shadow: var(--shadow-soft);
     }
 
     .spinner {
-      width: 48px;
-      height: 48px;
-      border: 4px solid rgba(255, 255, 255, 0.05);
-      border-top-color: var(--accent-primary);
+      width: 46px;
+      height: 46px;
+      border: 4px solid var(--line-2);
+      border-top-color: var(--orange);
       border-radius: 50%;
       animation: spin 1s linear infinite;
       margin-bottom: 1.5rem;
     }
 
     .loading-text {
-      font-family: 'Outfit', sans-serif;
+      font-family: var(--font-display);
       font-size: 1.3rem;
       font-weight: 600;
-      color: var(--text-primary);
+      color: var(--ink);
       margin-bottom: 0.5rem;
     }
 
     .loading-subtext {
-      color: var(--text-secondary);
+      color: var(--text-2);
       font-size: 0.95rem;
       animation: pulse 1.5s infinite;
     }
 
     /* Error state */
     .error-container {
-      background: rgba(239, 68, 68, 0.08);
-      border: 1px solid rgba(239, 68, 68, 0.2);
-      border-radius: 20px;
+      background: var(--status-error-soft);
+      border: 1px solid var(--status-error);
+      border-radius: var(--radius-lg);
       padding: 3rem 2rem;
       text-align: center;
     }
 
     .error-title {
-      font-family: 'Outfit', sans-serif;
+      font-family: var(--font-display);
       font-size: 1.4rem;
-      color: #fca5a5;
-      font-weight: 700;
+      color: var(--status-error-ink);
+      font-weight: 600;
       margin-bottom: 0.5rem;
     }
 
     .error-message {
-      color: var(--text-secondary);
+      color: var(--text-2);
       margin-bottom: 1.5rem;
     }
 
     .btn-retry {
-      background: var(--accent-primary);
-      color: white;
+      background: var(--orange);
+      color: var(--ink);
       border: none;
-      padding: 0.75rem 1.5rem;
-      border-radius: 8px;
+      padding: 0.8rem 1.6rem;
+      border-radius: var(--rad-pill);
       cursor: pointer;
       font-weight: 600;
       font-size: 0.95rem;
-      transition: all 0.2s;
+      font-family: var(--font-body);
+      transition: transform 0.18s var(--ease-lift), filter 0.18s ease;
     }
 
     .btn-retry:hover {
-      opacity: 0.9;
+      filter: brightness(0.94);
+      transform: translateY(-1px);
+    }
+
+    .btn-retry:disabled {
+      opacity: 0.5;
+      cursor: not-allowed;
+      transform: none;
+      filter: none;
     }
 
     /* Topics Grid & Cards */
@@ -180,29 +258,28 @@
       display: flex;
       flex-direction: column;
       gap: 1.5rem;
-      transition: all 0.4s ease-in-out;
+      transition: all 0.4s var(--ease-lift);
     }
 
     .card {
-      background: var(--bg-card);
-      border: 1px solid var(--border-color);
-      border-radius: 20px;
-      padding: 2rem;
-      backdrop-filter: blur(12px);
-      -webkit-backdrop-filter: blur(12px);
-      transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+      background: var(--bg);
+      border: 1px solid var(--line);
+      border-radius: var(--radius-lg);
+      padding: 2rem 2.1rem;
+      box-shadow: var(--shadow-soft);
+      transition: transform 0.3s var(--ease-lift), box-shadow 0.3s var(--ease-lift), border-color 0.3s ease;
       position: relative;
       display: flex;
       flex-direction: column;
       justify-content: space-between;
-      min-height: 220px;
+      min-height: 200px;
+      overflow: hidden;
     }
 
     .card:hover {
       transform: translateY(-4px);
-      background: var(--bg-card-hover);
-      border-color: rgba(99, 102, 241, 0.3);
-      box-shadow: 0 12px 30px rgba(0, 0, 0, 0.4), 0 0 1px 1px rgba(99, 102, 241, 0.15) inset;
+      border-color: var(--line-2);
+      box-shadow: var(--shadow-lifted);
     }
 
     .card-top {
@@ -216,53 +293,52 @@
     }
 
     .badge {
-      display: inline-block;
-      font-size: 0.72rem;
-      font-weight: 800;
-      letter-spacing: 0.05em;
-      padding: 0.3rem 0.75rem;
-      border-radius: 6px;
+      display: inline-flex;
+      align-items: center;
+      font-family: var(--font-mono);
+      font-size: 0.64rem;
+      font-weight: 700;
+      letter-spacing: 0.12em;
+      padding: 0.32rem 0.7rem;
+      border-radius: var(--rad-pill);
       text-transform: uppercase;
     }
 
-    /* Badge specific coloring */
+    /* Badge coloring — the four brand tints with ink text (AA-safe) */
     .badge-tech {
-      background: var(--badge-tech-bg);
-      color: var(--badge-tech-text);
-      border: 1px solid rgba(79, 70, 229, 0.2);
+      background: var(--tint-sky);
+      color: var(--ink);
     }
 
     .badge-skills {
-      background: var(--badge-skills-bg);
-      color: var(--badge-skills-text);
-      border: 1px solid rgba(217, 70, 239, 0.2);
+      background: var(--tint-lilac);
+      color: var(--ink);
     }
 
     .badge-recent {
-      background: var(--badge-recent-bg);
-      color: var(--badge-recent-text);
-      border: 1px solid rgba(245, 158, 11, 0.2);
+      background: var(--tint-peach);
+      color: var(--ink);
     }
 
     .badge-evergreen {
-      background: var(--badge-evergreen-bg);
-      color: var(--badge-evergreen-text);
-      border: 1px solid rgba(16, 185, 129, 0.2);
+      background: var(--tint-mint);
+      color: var(--ink);
     }
 
     .card-title {
-      font-family: 'Outfit', sans-serif;
-      font-size: 1.4rem;
-      font-weight: 700;
-      color: var(--text-primary);
+      font-family: var(--font-display);
+      font-size: 1.45rem;
+      font-weight: 600;
+      color: var(--ink);
       margin-bottom: 0.75rem;
-      line-height: 1.35;
+      line-height: 1.3;
+      letter-spacing: -0.01em;
     }
 
     .card-pitch {
-      color: var(--text-secondary);
+      color: var(--text-2);
       font-size: 0.98rem;
-      line-height: 1.55;
+      line-height: 1.6;
     }
 
     .card-bottom {
@@ -270,14 +346,17 @@
       align-items: center;
       justify-content: flex-end;
       margin-top: 1.5rem;
-      border-top: 1px solid rgba(255, 255, 255, 0.04);
+      border-top: 1px solid var(--line);
       padding-top: 1.25rem;
+      gap: 1rem;
     }
 
     .source-notes {
-      font-size: 0.8rem;
-      color: var(--text-muted);
-      max-width: 65%;
+      font-family: var(--font-mono);
+      font-size: 0.76rem;
+      letter-spacing: 0.02em;
+      color: var(--text-3);
+      max-width: 60%;
       white-space: nowrap;
       overflow: hidden;
       text-overflow: ellipsis;
@@ -285,55 +364,59 @@
     }
 
     .btn-select {
-      background: linear-gradient(135deg, var(--accent-primary) 0%, #4f46e5 100%);
-      color: white;
+      background: var(--orange);
+      color: var(--ink);
       border: none;
       padding: 0.75rem 1.5rem;
-      border-radius: 10px;
+      border-radius: var(--rad-pill);
       font-weight: 600;
+      font-family: var(--font-body);
+      font-size: 0.9rem;
       cursor: pointer;
-      box-shadow: 0 4px 10px rgba(99, 102, 241, 0.2);
-      transition: all 0.2s ease-in-out;
+      box-shadow: 0 8px 18px -12px rgba(255, 115, 0, 0.7);
+      transition: transform 0.18s var(--ease-lift), filter 0.18s ease, box-shadow 0.18s ease;
     }
 
     .btn-select:hover {
       transform: translateY(-1px);
-      box-shadow: 0 6px 15px rgba(99, 102, 241, 0.35);
+      filter: brightness(0.95);
+      box-shadow: 0 12px 24px -12px rgba(255, 115, 0, 0.8);
     }
 
     /* Selection Confirmation State */
     .topics-grid.has-selection .card:not(.selected) {
-      opacity: 0.4;
+      opacity: 0.45;
       pointer-events: none;
       transform: scale(0.98);
-      filter: grayscale(80%);
+      filter: grayscale(70%);
     }
 
     .topics-grid.has-selection .card.selected {
-      border-color: var(--success-green);
-      box-shadow: 0 0 25px rgba(16, 185, 129, 0.2);
+      border-color: var(--status-success);
+      box-shadow: 0 0 0 3px var(--status-success-soft), var(--shadow-lifted);
     }
 
     .card.selected .btn-select {
-      background: var(--success-green);
-      box-shadow: 0 4px 10px rgba(16, 185, 129, 0.2);
+      background: var(--status-success);
+      color: #fff;
+      box-shadow: none;
       cursor: default;
       pointer-events: none;
     }
 
     .success-alert {
       display: none;
-      background: var(--success-glow);
-      border: 1px solid rgba(16, 185, 129, 0.3);
-      color: #a7f3d0;
-      border-radius: 16px;
+      background: var(--status-success-soft);
+      border: 1px solid var(--status-success);
+      color: var(--status-success-ink);
+      border-radius: var(--radius-md);
       padding: 1.25rem 2rem;
       margin-bottom: 2.5rem;
       text-align: center;
       font-weight: 600;
-      font-family: 'Outfit', sans-serif;
+      font-family: var(--font-display);
       font-size: 1.15rem;
-      animation: slideDown 0.4s cubic-bezier(0.16, 1, 0.3, 1);
+      animation: slideDown 0.4s var(--ease-lift);
     }
 
     /* Animations */
@@ -361,13 +444,13 @@
     /* Responsive */
     @media (max-width: 768px) {
       body {
-        padding: 2rem 1rem;
+        padding: 2.5rem 1rem;
       }
       header h1 {
-        font-size: 2.2rem;
+        font-size: 2.3rem;
       }
       .card {
-        padding: 1.5rem;
+        padding: 1.6rem;
       }
       .card-bottom {
         flex-direction: column;
@@ -377,41 +460,97 @@
       .source-notes {
         max-width: 100%;
         text-align: center;
+        margin-right: 0;
       }
       .btn-select {
         width: 100%;
         text-align: center;
       }
+      .post-container {
+        padding: 2rem 1.5rem;
+      }
     }
 
-    /* Styles for the rendered blog post */
-    .post-container {
-      background: var(--bg-card);
-      border: 1px solid var(--border-color);
-      border-radius: 24px;
-      padding: 3rem 2.5rem;
-      backdrop-filter: blur(12px);
-      -webkit-backdrop-filter: blur(12px);
-      box-shadow: 0 10px 40px rgba(0, 0, 0, 0.3);
-      animation: slideDown 0.5s cubic-bezier(0.16, 1, 0.3, 1);
+    @media (max-width: 400px) {
+      header h1 {
+        font-size: 2rem;
+      }
     }
-    
+
+    /* Post confirmation panel.
+       NOTE (CSS-only choice to protect logic): the success screen is built in JS
+       (approveTopic innerHTML) and its headline uses a hardcoded near-white→mint
+       gradient that only reads on a dark surface. Reworked (still CSS-only — the
+       <script> is not modified): .post-container is now a light editorial card, the
+       legacy --text-*/--border-color/--badge-tech-text aliases resolve to light,
+       AA-legible values, and the heading/mono-box overrides below re-tune the
+       JS-injected inline styles for the light surface. */
+    .post-container {
+      background: var(--bg);
+      border: 1px solid var(--line);
+      border-radius: var(--radius-lg);
+      padding: 3rem 2.5rem;
+      box-shadow: var(--shadow-lifted);
+      color: var(--ink);
+      animation: slideDown 0.5s var(--ease-lift);
+    }
+
+    /* The injected .success-confirmation carries its own faint-green fill and
+       padding (tuned for the old dark panel). Flatten it so .post-container is
+       the single, clean editorial card. */
+    .post-container .success-confirmation {
+      background: transparent !important;
+      border: none !important;
+      padding: 0 !important;
+      margin-top: 0 !important;
+    }
+
+    /* Headline hardcodes a near-white-to-mint gradient (dark-panel only). Re-point
+       it to the brand ink gradient and brand serif so it reads richly on light. */
+    .post-container .success-confirmation h1 {
+      background: var(--grad-ink) !important;
+      -webkit-background-clip: text !important;
+      background-clip: text !important;
+      -webkit-text-fill-color: transparent !important;
+      color: var(--maroon) !important;
+      font-family: var(--font-display) !important;
+    }
+
+    /* Draft ID / slug box: light surface instead of the dark rgba fill. */
+    .post-container .success-confirmation div[style*="monospace"] {
+      background: var(--surface) !important;
+      border-color: var(--line) !important;
+    }
+
+    /* Secondary ("Approve More Topics") button is injected with an inline
+       transparent background — give it a legible ink outline on the light card. */
+    .post-container .btn-select[style*="transparent"] {
+      color: var(--ink);
+      border: 1.5px solid var(--line-2);
+      box-shadow: none;
+    }
+
+    .post-container .btn-select[style*="transparent"]:hover {
+      background: var(--surface-2);
+      filter: none;
+    }
+
     .post-meta-box {
-      background: rgba(99, 102, 241, 0.05);
-      border-left: 4px solid var(--accent-primary);
+      background: rgba(255, 115, 0, 0.06);
+      border-left: 4px solid var(--orange);
       padding: 1.25rem 1.5rem;
-      border-radius: 0 12px 12px 0;
+      border-radius: 0 var(--radius-sm) var(--radius-sm) 0;
       margin-bottom: 2.5rem;
       font-size: 0.95rem;
       line-height: 1.5;
     }
-    
+
     .post-meta-box strong {
-      color: var(--text-primary);
+      color: var(--d-text);
     }
 
     .post-meta-box p {
-      color: var(--text-secondary);
+      color: var(--d-text-2);
       margin: 0;
       margin-top: 0.25rem;
     }
@@ -419,39 +558,39 @@
     .post-body {
       font-size: 1.05rem;
       line-height: 1.7;
-      color: var(--text-primary);
+      color: var(--d-text);
       text-align: left;
     }
 
     .post-body h2 {
-      font-family: 'Outfit', sans-serif;
+      font-family: var(--font-display);
       font-size: 1.8rem;
-      font-weight: 700;
+      font-weight: 600;
       margin-top: 2.5rem;
       margin-bottom: 1rem;
-      color: var(--text-primary);
-      border-bottom: 1px solid rgba(255, 255, 255, 0.05);
+      color: var(--d-text);
+      border-bottom: 1px solid var(--d-line);
       padding-bottom: 0.5rem;
     }
 
     .post-body h3 {
-      font-family: 'Outfit', sans-serif;
+      font-family: var(--font-display);
       font-size: 1.4rem;
       font-weight: 600;
       margin-top: 2rem;
       margin-bottom: 0.75rem;
-      color: var(--text-primary);
+      color: var(--d-text);
     }
 
     .post-body p {
       margin-bottom: 1.5rem;
-      color: var(--text-secondary);
+      color: var(--d-text-2);
     }
 
     .post-body ul, .post-body ol {
       margin-bottom: 1.5rem;
       padding-left: 1.5rem;
-      color: var(--text-secondary);
+      color: var(--d-text-2);
     }
 
     .post-body li {
@@ -463,21 +602,21 @@
       border-collapse: collapse;
       margin-bottom: 2rem;
       margin-top: 1.5rem;
-      background: rgba(255, 255, 255, 0.02);
-      border-radius: 12px;
+      background: var(--d-surface);
+      border-radius: var(--radius-sm);
       overflow: hidden;
-      border: 1px solid var(--border-color);
+      border: 1px solid var(--d-line);
     }
 
     .post-body th, .post-body td {
       padding: 0.75rem 1rem;
       text-align: left;
-      border-bottom: 1px solid rgba(255, 255, 255, 0.05);
+      border-bottom: 1px solid var(--d-line);
     }
 
     .post-body th {
-      background: rgba(255, 255, 255, 0.04);
-      color: var(--text-primary);
+      background: var(--d-surface-2);
+      color: var(--d-text);
       font-weight: 600;
     }
 
@@ -486,11 +625,11 @@
     }
 
     .post-body blockquote {
-      border-left: 4px solid var(--success-green);
-      background: rgba(16, 185, 129, 0.03);
+      border-left: 4px solid var(--orange);
+      background: rgba(255, 115, 0, 0.05);
       padding: 1rem 1.5rem;
       margin-bottom: 1.5rem;
-      border-radius: 0 8px 8px 0;
+      border-radius: 0 var(--radius-sm) var(--radius-sm) 0;
     }
 
     .post-body blockquote p {
@@ -504,12 +643,12 @@
     }
 
     .post-header h1 {
-      font-family: 'Outfit', sans-serif;
+      font-family: var(--font-display);
       font-size: 2.4rem;
-      font-weight: 800;
+      font-weight: 600;
       line-height: 1.25;
       margin-bottom: 1rem;
-      color: var(--text-primary);
+      color: var(--d-text);
     }
 
     .post-header-meta {
@@ -522,20 +661,140 @@
     .btn-back {
       display: block;
       background: transparent;
-      color: var(--text-secondary);
-      border: 1px solid var(--border-color);
+      color: var(--d-text-2);
+      border: 1px solid var(--d-line-strong);
       padding: 0.6rem 1.25rem;
-      border-radius: 8px;
+      border-radius: var(--rad-pill);
       cursor: pointer;
       font-weight: 600;
       margin-bottom: 2rem;
-      transition: all 0.2s;
+      transition: background-color 0.18s ease, color 0.18s ease, border-color 0.18s ease;
     }
 
     .btn-back:hover {
-      background: rgba(255, 255, 255, 0.05);
-      color: var(--text-primary);
-      border-color: rgba(255, 255, 255, 0.15);
+      background: var(--d-surface-2);
+      color: var(--d-text);
+      border-color: var(--d-text-3);
+    }
+
+    /* Focus visibility — never remove an outline without a replacement */
+    :focus-visible {
+      outline: 2px solid var(--orange);
+      outline-offset: 2px;
+      border-radius: 3px;
+    }
+
+    @media (prefers-reduced-motion: reduce) {
+      *, *::before, *::after {
+        animation: none !important;
+        transition: none !important;
+        scroll-behavior: auto !important;
+      }
+    }
+
+    /* ============================================================
+       PODSCRAPE GRADIENT THEME — final override layer.
+       This page is token-driven, so re-pointing the palette flips it to
+       the deep navy→black→maroon gradient with purple/maroon accents.
+       Append-only: no markup, ID, class, script hook or frozen data
+       contract is changed — only three explicit fixes are needed
+       (hero heading, pastel badges, success/error legibility). */
+    :root {
+      --bg: #0a0a0b;
+      --surface: rgba(255, 255, 255, 0.035);
+      --surface-2: rgba(255, 255, 255, 0.06);
+      --ink: #f0f0f2;                       /* now the primary light text */
+      --ink-2: #d7dae3;
+      --text-2: rgba(255, 255, 255, 0.66);
+      --text-3: rgba(255, 255, 255, 0.45);
+      --line: rgba(255, 255, 255, 0.10);
+      --line-2: rgba(255, 255, 255, 0.18);
+      --orange: #720075;                    /* accent → PodScrape purple */
+      --badge-tech-text: #c65cff;           /* slug accent in the success panel */
+    }
+
+    /* Deep gradient canvas + ambient glow orbs. */
+    body {
+      background: linear-gradient(160deg, #0a1733 0%, #000000 45%, #3a0230 75%, #5e0743 100%);
+      background-attachment: fixed;
+      background-repeat: no-repeat;
+      background-size: cover;
+      color: var(--ink);
+    }
+    body::before {
+      content: '';
+      position: fixed;
+      top: -20%; left: 50%;
+      transform: translateX(-50%);
+      width: 900px; height: 600px;
+      background: radial-gradient(ellipse at center, rgba(114, 0, 117, 0.18) 0%, transparent 70%);
+      pointer-events: none; z-index: 0;
+    }
+    body::after {
+      content: '';
+      position: fixed;
+      bottom: -10%; right: -10%;
+      width: 600px; height: 600px;
+      background: radial-gradient(ellipse at center, rgba(94, 7, 67, 0.15) 0%, transparent 70%);
+      pointer-events: none; z-index: 0;
+    }
+    .glow-circle { background: radial-gradient(circle, rgba(114, 0, 117, 0.14) 0%, transparent 68%); }
+
+    /* Hero heading: grad-ink dies on dark — use a light→purple gradient. */
+    header h1 {
+      background: linear-gradient(90deg, #ffffff 0%, #c65cff 55%, #ff7ab8 100%);
+      -webkit-background-clip: text;
+      background-clip: text;
+      -webkit-text-fill-color: transparent;
+      color: #ffffff;
+    }
+
+    /* Pastel badges keep dark ink text on their light chips. */
+    .badge-tech, .badge-skills, .badge-recent, .badge-evergreen { color: #0a1733; }
+
+    /* Cards & loading → dark glass with purple hover. */
+    .card { background: rgba(255, 255, 255, 0.03); border-color: rgba(255, 255, 255, 0.08); }
+    .card:hover {
+      border-color: rgba(114, 0, 117, 0.5);
+      box-shadow: 0 24px 60px -30px rgba(114, 0, 117, 0.45);
+    }
+    .loading-container {
+      background: rgba(17, 17, 20, 0.5);
+      border-color: rgba(114, 0, 117, 0.22);
+      box-shadow: 0 24px 60px -30px rgba(0, 0, 0, 0.7);
+    }
+
+    /* Status blocks re-tuned for dark legibility. */
+    .success-alert {
+      background: rgba(71, 255, 178, 0.10);
+      border-color: rgba(71, 255, 178, 0.30);
+      color: #47ffb2;
+    }
+    .error-container { background: rgba(255, 71, 71, 0.08); border-color: rgba(255, 71, 71, 0.30); }
+    .error-title { color: #ff6b6b; }
+
+    /* Primary/select buttons → purple→maroon gradient with glow. The green
+       "selected" state has higher specificity and is intentionally preserved. */
+    .btn-select, .btn-retry {
+      background: linear-gradient(135deg, #720075, #5e0743);
+      color: #ffffff;
+      border: 1px solid rgba(114, 0, 117, 0.4);
+      box-shadow: 0 8px 22px -12px rgba(114, 0, 117, 0.7);
+    }
+    .btn-select:hover, .btn-retry:hover {
+      filter: none;
+      box-shadow: 0 0 16px 2px rgba(114, 0, 117, 0.5), 0 8px 32px rgba(94, 7, 67, 0.4);
+    }
+
+    /* Success panel → dark glass; its heading override must beat the earlier
+       light-layer !important rule, hence !important here too. */
+    .post-container { background: rgba(17, 17, 20, 0.6); border-color: rgba(114, 0, 117, 0.25); }
+    .post-container .success-confirmation h1 {
+      background: linear-gradient(90deg, #ffffff, #c65cff) !important;
+      -webkit-background-clip: text !important;
+      background-clip: text !important;
+      -webkit-text-fill-color: transparent !important;
+      color: #ffffff !important;
     }
   </style>
 </head>
@@ -575,12 +834,28 @@
 
   <script>
     let activeTopics = [];
+    let topicsLoading = false; // in-flight guard: prevents rapid re-clicks triggering duplicate billed runs
 
     async function loadTopics() {
+      // Debounce/guard: ignore re-entrant calls while a load is already running
+      if (topicsLoading) {
+        console.log('Topics already loading — ignoring duplicate request.');
+        return;
+      }
+      topicsLoading = true;
+
       const loadingState = document.getElementById('loadingState');
       const errorState = document.getElementById('errorState');
       const topicsGrid = document.getElementById('topicsGrid');
       const successAlert = document.getElementById('successAlert');
+      const errorBtn = document.getElementById('errorBtn');
+
+      // Disable the retry button while a request is in flight
+      if (errorBtn) {
+        errorBtn.disabled = true;
+        errorBtn.style.opacity = '0.5';
+        errorBtn.style.cursor = 'not-allowed';
+      }
 
       // Reset UI states
       loadingState.style.display = 'flex';
@@ -612,6 +887,13 @@
         document.getElementById('errorMessage').innerText = err.message || 'Make sure your ANTHROPIC_API_KEY is configured in your .env file.';
         loadingState.style.display = 'none';
         errorState.style.display = 'block';
+      } finally {
+        topicsLoading = false;
+        if (errorBtn) {
+          errorBtn.disabled = false;
+          errorBtn.style.opacity = '';
+          errorBtn.style.cursor = '';
+        }
       }
     }
 

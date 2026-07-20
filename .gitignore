@@ -1,3 +1,4 @@
 node_modules/
 .env
 data/post_log.json
+data/research_cache.json

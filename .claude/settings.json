@@ -1,0 +1,11 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(node -e ' *)",
+      "Read(//c/Users/brend/.claude/projects/c--Users-brend-Desktop-melsoft-blog-agent/memory/**)"
+    ],
+    "additionalDirectories": [
+      "c:\\Users\\brend\\.claude\\projects\\c--Users-brend-Desktop-melsoft-blog-agent\\memory"
+    ]
+  }
+}
