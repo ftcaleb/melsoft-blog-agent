@@ -26,6 +26,10 @@ import { markdownToBlocks, computeReadTime } from './markdownToBlocks.js';
 
 const DISCORD_API_BASE = 'https://discord.com/api/v10';
 
+// Live post URL base on the Melsoft website (the same base the dashboard's
+// "View live" button uses). A published post lives at `${LIVE_POST_BASE}/${slug}`.
+const LIVE_POST_BASE = 'https://www.melsoftacademy.com/blog-preview';
+
 // ---------------------------------------------------------------------------
 // Small helpers (shared by slash-command AND button handlers so the two never
 // duplicate business logic).
@@ -181,7 +185,11 @@ async function runPublish(slug) {
     .eq('id', existing.id);
 
   if (updErr) return { ok: false, message: `Publish failed: ${updErr.message}` };
-  return { ok: true, message: `Published **${existing.title}** (\`${clean}\`).`, title: existing.title };
+  return {
+    ok: true,
+    message: `✅ Published: ${existing.title}\n🔗 ${LIVE_POST_BASE}/${clean}`,
+    title: existing.title,
+  };
 }
 
 // PATCHes the deferred interaction's original response with the final message.
