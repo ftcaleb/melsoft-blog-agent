@@ -1214,8 +1214,8 @@
     }
     .list-tab:hover { color: #fff; }
     .list-tab.active { background: rgba(114, 0, 117, 0.35); color: #fff; }
-    /* Room between the two actions (Open + Delete) on published cards. */
-    .draft-card-actions { gap: 0.5rem; }
+    /* Room between the actions (View live / Open / Delete) on published cards. */
+    .draft-card-actions { gap: 0.5rem; flex-wrap: wrap; }
   </style>
 </head>
 <body>
@@ -1482,6 +1482,10 @@
     let trendingTopics = [];  // candidate topics currently shown on the Topics tab
     let isGenerating = false; // guard: a post generation is in flight
 
+    // Live post URL on the Melsoft website (pattern: /blog-preview/<slug>).
+    const LIVE_POST_BASE = 'https://www.melsoftacademy.com/blog-preview';
+    function livePostUrl(slug) { return LIVE_POST_BASE + '/' + slug; }
+
     // Initialize Supabase
     try {
       if (SUPABASE_ANON_KEY !== "<<PASTE_ANON_KEY_PLACEHOLDER>>") {
@@ -1656,7 +1660,7 @@
       try {
         const { data, error } = await supabaseClient
           .from('posts')
-          .select('id, title, excerpt, created_at, published_at, status, tint')
+          .select('id, title, excerpt, created_at, published_at, status, tint, slug')
           .eq('status', status)
           .order(isPublished ? 'published_at' : 'created_at', { ascending: false });
 
@@ -1683,8 +1687,12 @@
           else if (rawTint.includes('mint')) tintClass = 'tint-mint-preview';
           else if (rawTint.includes('lilac')) tintClass = 'tint-lilac-preview';
 
+          const viewLive = (isPublished && post.slug)
+            ? `<a href="${livePostUrl(post.slug)}" target="_blank" rel="noopener" class="btn btn-secondary btn-sm">View live</a>`
+            : '';
           const actions = isPublished
-            ? `<button type="button" class="btn btn-secondary btn-sm" onclick="openDraft(event, '${post.id}')">Open</button>
+            ? `${viewLive}
+               <button type="button" class="btn btn-secondary btn-sm" onclick="openDraft(event, '${post.id}')">Open</button>
                <button type="button" class="btn btn-danger btn-sm" onclick="deletePost(event, '${post.id}')">Delete</button>`
             : `<button type="button" class="btn btn-secondary btn-sm" onclick="openDraft(event, '${post.id}')">Open / Review</button>`;
 
@@ -2155,7 +2163,7 @@
         // Single atomic update: save the eight editable fields AND flip the
         // post live. The logged-in session's "authed full access" RLS policy
         // permits this; the website reads published posts straight from Supabase.
-        const { error } = await supabaseClient
+        const { data: published, error } = await supabaseClient
           .from('posts')
           .update({
             title,
@@ -2169,16 +2177,20 @@
             status: 'published',
             published_at: new Date().toISOString()
           })
-          .eq('id', currentDraftId);
+          .eq('id', currentDraftId)
+          .select('slug')
+          .single();
 
         if (error) throw error;
 
-        showStatus('Post published — it is now live on the website blog.', 'success');
-
-        // Return to draft list after a brief delay
-        setTimeout(() => {
-          showListView(e);
-        }, 2000);
+        // Redirect to the now-live post on the Melsoft website.
+        if (published && published.slug) {
+          showStatus('Post published — opening it on the website…', 'success');
+          setTimeout(() => { window.location.href = livePostUrl(published.slug); }, 1000);
+        } else {
+          showStatus('Post published — it is now live on the website blog.', 'success');
+          setTimeout(() => { showListView(e); }, 2000);
+        }
 
       } catch (err) {
         showStatus('Publishing failed: ' + err.message, 'error');
