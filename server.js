@@ -77,7 +77,7 @@ const DISCORD_MAX_BUTTON_ROWS = 5; // max action rows in one message
 // stay compact and never collide with Discord's 80-char label limit; a topic
 // whose custom_id would exceed the 100-char limit is skipped (it stays in the
 // text list and is still draftable via `/generate`).
-function buildTopicButtons(candidates) {
+export function buildTopicButtons(candidates) {
   const rows = [];
   let current = null;
   const skipped = [];
@@ -112,21 +112,55 @@ function buildTopicButtons(candidates) {
   return rows;
 }
 
-// Sends a Discord notification via webhook, if DISCORD_WEBHOOK_URL is set.
-// Awaited (so it finishes before a serverless function returns) but non-fatal:
-// a missing URL is skipped silently, and any failure is logged, never thrown.
-// Optionally accepts interactive `components` (button rows). Those are sent with
-// ?with_components=true so Discord renders them on the webhook message; button
-// CLICKS route to the app's Interactions Endpoint (same Discord application),
-// not back to this webhook. If a webhook can't render components (e.g. it isn't
-// application-owned), we never drop the notification — we retry as plain text.
-async function notifyDiscord(content, components) {
+// Sends a Discord notification. Awaited (so it finishes before a serverless
+// function returns) but non-fatal: everything is logged, never thrown.
+//
+// Two delivery paths, chosen automatically:
+//   1. BOT-TOKEN channel message — used when interactive `components` (buttons)
+//      are present AND both DISCORD_CHANNEL_ID and DISCORD_BOT_TOKEN are set.
+//      Components render natively on bot-sent messages (no ?with_components=true
+//      and no special flag). A plain channel webhook is NOT application-owned
+//      and cannot render interactive buttons, so this is the only path that can.
+//   2. WEBHOOK (DISCORD_WEBHOOK_URL) — the original behaviour, used when there
+//      are no components, or when the bot path is unconfigured or fails. When
+//      components are absent this is byte-for-byte the original plain-text post.
+//
+// The bot token is used only as an Authorization header — never logged, printed,
+// or included in any error message.
+export async function notifyDiscord(content, components) {
+  // Discord caps message content at 2000 chars.
+  const contentStr = String(content).slice(0, 1990);
+  const hasComponents = Array.isArray(components) && components.length > 0;
+
+  const botToken = process.env.DISCORD_BOT_TOKEN;
+  const channelId = process.env.DISCORD_CHANNEL_ID;
+
+  // Path 1: bot-token channel message (only when we have buttons to render and
+  // the bot is configured). On success we're done; on failure we fall through
+  // to the webhook path so a notification is never lost.
+  if (hasComponents && botToken && channelId) {
+    try {
+      const resp = await fetch(`https://discord.com/api/v10/channels/${channelId}/messages`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bot ${botToken}`,
+        },
+        body: JSON.stringify({ content: contentStr, components }),
+      });
+      if (resp.ok) return;
+      // Log status only — never the token or headers.
+      console.warn(`[discord] Bot channel message responded ${resp.status}; falling back to webhook.`);
+    } catch (err) {
+      console.warn('[discord] Bot channel message failed:', err.message);
+    }
+  }
+
+  // Path 2: webhook fallback (original behaviour). Skipped silently if no URL.
   const url = process.env.DISCORD_WEBHOOK_URL;
   if (!url) return;
 
-  // Discord caps message content at 2000 chars.
-  const base = { content: String(content).slice(0, 1990) };
-  const hasComponents = Array.isArray(components) && components.length > 0;
+  const base = { content: contentStr };
 
   const send = (payload, withComponents) => {
     const endpoint = withComponents
