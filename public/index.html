@@ -867,6 +867,7 @@
 
     <header id="mainHeader" style="display:none;">
       <div style="display:flex; justify-content:flex-end; gap:0.75rem; margin-bottom:1rem;">
+        <button id="regenBtn" onclick="regenerateTopics()" class="nav-link">↻ Regenerate</button>
         <a href="/dashboard.html" class="nav-link">Dashboard</a>
         <button id="logoutBtn" onclick="handleLogout()" class="logout-link">Log out</button>
       </div>
@@ -967,7 +968,14 @@
       try { await supabaseClient.auth.signOut(); } catch (e) {}
     }
 
-    async function loadTopics() {
+    // Force a fresh (billed) research run from the UI, bypassing the cache.
+    async function regenerateTopics() {
+      if (topicsLoading) return;
+      if (!confirm('Run fresh research now? This makes a new (billed) request to find the latest topics. Normal reloads are free.')) return;
+      loadTopics(true);
+    }
+
+    async function loadTopics(forceFresh = false) {
       // Debounce/guard: ignore re-entrant calls while a load is already running
       if (topicsLoading) {
         console.log('Topics already loading — ignoring duplicate request.');
@@ -989,15 +997,20 @@
       }
 
       // Reset UI states
+      loadingState.querySelector('.loading-text').innerText = forceFresh ? 'Researching fresh topics…' : 'Generating candidate topics';
+      loadingState.querySelector('.loading-subtext').innerText = 'Running South African news search and applying B-BBEE, QCTO and SETA scoring rules...';
       loadingState.style.display = 'flex';
       errorState.style.display = 'none';
       topicsGrid.style.display = 'none';
       topicsGrid.className = 'topics-grid';
       successAlert.style.display = 'none';
       topicsGrid.innerHTML = '';
+      const postContainerEl = document.getElementById('postContainer');
+      if (postContainerEl) postContainerEl.style.display = 'none';
 
       try {
-        const response = await fetch('/api/topics', { headers: await authHeaders() });
+        const url = forceFresh ? '/api/topics?fresh=true' : '/api/topics';
+        const response = await fetch(url, { headers: await authHeaders() });
         if (response.status === 401) { showLogin(); return; }
         if (!response.ok) {
           throw new Error(`Server returned status ${response.status}`);
