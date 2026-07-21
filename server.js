@@ -60,19 +60,96 @@ async function requireAuth(req, res, next) {
   }
 }
 
+// Discord message-component constants (see discord.com/developers component docs).
+const DISCORD_ACTION_ROW = 1; // component type: a row that holds up to 5 buttons
+const DISCORD_BUTTON = 2; // component type: a button
+const DISCORD_BUTTON_PRIMARY = 1; // button style: filled/primary
+const DISCORD_CUSTOM_ID_MAX = 100; // hard limit on a component custom_id
+const DISCORD_BUTTONS_PER_ROW = 5; // max buttons in one action row
+const DISCORD_MAX_BUTTON_ROWS = 5; // max action rows in one message
+
+// Builds "Generate #N" button rows for the given topic candidates, matching the
+// numbering used in the notification's text list. Each button's custom_id is
+// `generate:<full title>` — the exact format the existing Discord interactions
+// handler (src/discordInteractions.js) parses and routes to runGenerate, the
+// same code path as the /generate slash command. A click therefore drafts that
+// topic with no extra wiring. Buttons are numbered (not title-labelled) so they
+// stay compact and never collide with Discord's 80-char label limit; a topic
+// whose custom_id would exceed the 100-char limit is skipped (it stays in the
+// text list and is still draftable via `/generate`).
+function buildTopicButtons(candidates) {
+  const rows = [];
+  let current = null;
+  const skipped = [];
+
+  for (let i = 0; i < candidates.length; i++) {
+    const title = String(candidates[i] && candidates[i].title || '').trim();
+    if (!title) continue;
+
+    const customId = `generate:${title}`;
+    if (customId.length > DISCORD_CUSTOM_ID_MAX) {
+      skipped.push(i + 1);
+      continue;
+    }
+
+    if (!current || current.components.length >= DISCORD_BUTTONS_PER_ROW) {
+      if (rows.length >= DISCORD_MAX_BUTTON_ROWS) break; // out of room for more rows
+      current = { type: DISCORD_ACTION_ROW, components: [] };
+      rows.push(current);
+    }
+
+    current.components.push({
+      type: DISCORD_BUTTON,
+      style: DISCORD_BUTTON_PRIMARY,
+      label: `Generate #${i + 1}`,
+      custom_id: customId,
+    });
+  }
+
+  if (skipped.length) {
+    console.log(`[discord] Skipped Generate buttons for long-title topic(s): #${skipped.join(', #')} (still listed; draftable via /generate).`);
+  }
+  return rows;
+}
+
 // Sends a Discord notification via webhook, if DISCORD_WEBHOOK_URL is set.
 // Awaited (so it finishes before a serverless function returns) but non-fatal:
 // a missing URL is skipped silently, and any failure is logged, never thrown.
-async function notifyDiscord(content) {
+// Optionally accepts interactive `components` (button rows). Those are sent with
+// ?with_components=true so Discord renders them on the webhook message; button
+// CLICKS route to the app's Interactions Endpoint (same Discord application),
+// not back to this webhook. If a webhook can't render components (e.g. it isn't
+// application-owned), we never drop the notification — we retry as plain text.
+async function notifyDiscord(content, components) {
   const url = process.env.DISCORD_WEBHOOK_URL;
   if (!url) return;
-  try {
-    const resp = await fetch(url, {
+
+  // Discord caps message content at 2000 chars.
+  const base = { content: String(content).slice(0, 1990) };
+  const hasComponents = Array.isArray(components) && components.length > 0;
+
+  const send = (payload, withComponents) => {
+    const endpoint = withComponents
+      ? url + (url.includes('?') ? '&' : '?') + 'with_components=true'
+      : url;
+    return fetch(endpoint, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      // Discord caps message content at 2000 chars.
-      body: JSON.stringify({ content: String(content).slice(0, 1990) })
+      body: JSON.stringify(payload),
     });
+  };
+
+  try {
+    let resp;
+    if (hasComponents) {
+      resp = await send({ ...base, components }, true);
+      if (!resp.ok) {
+        console.warn(`[discord] Webhook with components responded ${resp.status}; retrying as plain text.`);
+        resp = await send(base, false);
+      }
+    } else {
+      resp = await send(base, false);
+    }
     if (!resp.ok) console.warn(`[discord] Webhook responded ${resp.status}`);
   } catch (err) {
     console.warn('[discord] Notification failed:', err.message);
@@ -95,13 +172,19 @@ app.get('/api/cron/refresh-topics', async (req, res) => {
     const candidates = await refreshResearchCache();
     console.log(`[cron] Research cache refreshed: ${candidates.length} candidates.`);
 
-    // Notify Discord that fresh topics were generated (non-fatal).
+    // Notify Discord that fresh topics were generated (non-fatal). Each listed
+    // topic also gets a "Generate #N" button (built from the SAME slice, so the
+    // numbering lines up) — clicking one drafts that topic via the existing
+    // Discord interactions handler. Buttons appear only where the webhook can
+    // render them; the text list is always sent as a fallback.
     const appUrl = process.env.APP_URL || 'https://melsoft-blog.vercel.app';
-    const list = candidates.slice(0, 10).map((c, i) => `${i + 1}. ${c.title}`).join('\n');
+    const listed = candidates.slice(0, 10);
+    const list = listed.map((c, i) => `${i + 1}. ${c.title}`).join('\n');
+    const buttons = buildTopicButtons(listed);
     const message = candidates.length
-      ? `🔔 **Fresh blog topics generated** — ${candidates.length} new candidate${candidates.length === 1 ? '' : 's'}\n\n👉 **Open the blog agent:** ${appUrl}\n\n${list}`
+      ? `🔔 **Fresh blog topics generated** — ${candidates.length} new candidate${candidates.length === 1 ? '' : 's'}\n\n👉 **Open the blog agent:** ${appUrl}\n\n${list}\n\n🖱️ Tap **Generate #N** below to draft that topic here in Discord.`
       : `🔔 Topic research ran but found no recent candidates this time.\n\n👉 **Open the blog agent:** ${appUrl}`;
-    await notifyDiscord(message);
+    await notifyDiscord(message, candidates.length ? buttons : undefined);
 
     return res.json({ ok: true, refreshedAt: new Date().toISOString(), count: candidates.length });
   } catch (err) {
