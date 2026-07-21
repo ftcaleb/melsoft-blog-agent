@@ -2163,7 +2163,7 @@
         // Single atomic update: save the eight editable fields AND flip the
         // post live. The logged-in session's "authed full access" RLS policy
         // permits this; the website reads published posts straight from Supabase.
-        const { data: published, error } = await supabaseClient
+        const { error } = await supabaseClient
           .from('posts')
           .update({
             title,
@@ -2177,20 +2177,18 @@
             status: 'published',
             published_at: new Date().toISOString()
           })
-          .eq('id', currentDraftId)
-          .select('slug')
-          .single();
+          .eq('id', currentDraftId);
 
         if (error) throw error;
 
-        // Redirect to the now-live post on the Melsoft website.
-        if (published && published.slug) {
-          showStatus('Post published — opening it on the website…', 'success');
-          setTimeout(() => { window.location.href = livePostUrl(published.slug); }, 1000);
-        } else {
-          showStatus('Post published — it is now live on the website blog.', 'success');
-          setTimeout(() => { showListView(e); }, 2000);
-        }
+        showStatus('Post published — see it under the Published tab (View live).', 'success');
+
+        // Land on the Published tab, where the new post shows a "View live" link.
+        // No auto-redirect — viewing the live post is an explicit choice.
+        setTimeout(() => {
+          currentTab = 'published';
+          showListView(e);
+        }, 1500);
 
       } catch (err) {
         showStatus('Publishing failed: ' + err.message, 'error');
