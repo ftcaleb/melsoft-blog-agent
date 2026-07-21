@@ -830,6 +830,14 @@
       transition: border-color 0.18s ease, color 0.18s ease;
     }
     .logout-link:hover { border-color: rgba(114, 0, 117, 0.6); color: #fff; }
+    .nav-link {
+      display: inline-flex; align-items: center;
+      background: rgba(114, 0, 117, 0.15); border: 1px solid rgba(114, 0, 117, 0.4);
+      color: #ffffff; padding: 0.5rem 1.1rem; border-radius: var(--rad-pill);
+      font-size: 0.8rem; font-weight: 600; text-decoration: none;
+      transition: background-color 0.18s ease, border-color 0.18s ease;
+    }
+    .nav-link:hover { background: rgba(114, 0, 117, 0.3); border-color: #720075; }
   </style>
   <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
 </head>
@@ -858,7 +866,8 @@
     </div>
 
     <header id="mainHeader" style="display:none;">
-      <div style="display:flex; justify-content:flex-end; margin-bottom:1rem;">
+      <div style="display:flex; justify-content:flex-end; gap:0.75rem; margin-bottom:1rem;">
+        <a href="/dashboard.html" class="nav-link">Dashboard</a>
         <button id="logoutBtn" onclick="handleLogout()" class="logout-link">Log out</button>
       </div>
       <h1>Melsoft Blog Agent</h1>
