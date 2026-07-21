@@ -51,11 +51,30 @@ async function requireAuth(req, res, next) {
   }
 }
 
+// Sends a Discord notification via webhook, if DISCORD_WEBHOOK_URL is set.
+// Awaited (so it finishes before a serverless function returns) but non-fatal:
+// a missing URL is skipped silently, and any failure is logged, never thrown.
+async function notifyDiscord(content) {
+  const url = process.env.DISCORD_WEBHOOK_URL;
+  if (!url) return;
+  try {
+    const resp = await fetch(url, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      // Discord caps message content at 2000 chars.
+      body: JSON.stringify({ content: String(content).slice(0, 1990) })
+    });
+    if (!resp.ok) console.warn(`[discord] Webhook responded ${resp.status}`);
+  } catch (err) {
+    console.warn('[discord] Notification failed:', err.message);
+  }
+}
+
 // Scheduled research-cache refresh (Vercel cron). Authenticated by CRON_SECRET,
 // which Vercel injects as "Authorization: Bearer <CRON_SECRET>" on cron
 // requests — NOT the Supabase session — so it is registered BEFORE the
-// requireAuth gate below. It regenerates the recent-topics research and stores
-// it in Supabase; nothing is written to the posts table.
+// requireAuth gate below. It regenerates the recent-topics research, stores it
+// in Supabase (nothing is written to the posts table), and pings Discord.
 app.get('/api/cron/refresh-topics', async (req, res) => {
   const secret = process.env.CRON_SECRET;
   const auth = req.headers.authorization || '';
@@ -66,6 +85,15 @@ app.get('/api/cron/refresh-topics', async (req, res) => {
     console.log('[cron] Refreshing research cache...');
     const candidates = await refreshResearchCache();
     console.log(`[cron] Research cache refreshed: ${candidates.length} candidates.`);
+
+    // Notify Discord that fresh topics were generated (non-fatal).
+    const appUrl = process.env.APP_URL || 'https://melsoft-blog.vercel.app';
+    const list = candidates.slice(0, 10).map((c, i) => `${i + 1}. ${c.title}`).join('\n');
+    const message = candidates.length
+      ? `🔔 **Fresh blog topics generated** — ${candidates.length} candidate${candidates.length === 1 ? '' : 's'}\nReview them at ${appUrl}\n${list}`
+      : `🔔 Topic research ran but found no recent candidates this time.\n${appUrl}`;
+    await notifyDiscord(message);
+
     return res.json({ ok: true, refreshedAt: new Date().toISOString(), count: candidates.length });
   } catch (err) {
     console.error('[cron] Refresh failed:', err);
