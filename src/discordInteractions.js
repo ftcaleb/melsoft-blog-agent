@@ -176,7 +176,10 @@ async function runPublish(slug) {
   if (findErr) return { ok: false, message: `Lookup failed: ${findErr.message}` };
   if (!existing) return { ok: false, message: `No post found with slug \`${clean}\`.` };
   if (existing.status === 'published') {
-    return { ok: false, message: `\`${clean}\` is already published.` };
+    return {
+      ok: false,
+      message: `ℹ️ Already published: ${existing.title}\n🔗 ${LIVE_POST_BASE}/${clean}`,
+    };
   }
 
   const { error: updErr } = await supabase
