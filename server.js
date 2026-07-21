@@ -1,5 +1,6 @@
 import express from 'express';
 import dotenv from 'dotenv';
+import crypto from 'crypto';
 import { generateCandidates } from './src/research.js';
 import { selectTopics } from './src/select.js';
 import { writePost } from './src/writer.js';
@@ -13,6 +14,51 @@ const PORT = process.env.PORT || 3000;
 
 // Enable JSON parsing middleware
 app.use(express.json());
+
+// ---------------------------------------------------------------------------
+// Optional HTTP Basic Auth gate.
+// Enabled only when BASIC_AUTH_USER and BASIC_AUTH_PASS are both set, so local
+// dev without them is unaffected. It sits before the static handler and the
+// routes, so it protects BOTH the admin pages and the billed /api/* endpoints
+// (research + post generation) — preventing anyone with the public URL from
+// draining the Anthropic key. No front-end change is needed: after the initial
+// prompt the browser auto-sends credentials on same-origin fetches.
+// ---------------------------------------------------------------------------
+const BASIC_AUTH_USER = process.env.BASIC_AUTH_USER;
+const BASIC_AUTH_PASS = process.env.BASIC_AUTH_PASS;
+
+function safeEqual(a, b) {
+  const ab = Buffer.from(String(a));
+  const bb = Buffer.from(String(b));
+  // Length check first avoids timingSafeEqual throwing on unequal lengths.
+  if (ab.length !== bb.length) return false;
+  return crypto.timingSafeEqual(ab, bb);
+}
+
+if (BASIC_AUTH_USER && BASIC_AUTH_PASS) {
+  app.use((req, res, next) => {
+    const header = req.headers.authorization || '';
+    const [scheme, encoded] = header.split(' ');
+
+    if (scheme === 'Basic' && encoded) {
+      const decoded = Buffer.from(encoded, 'base64').toString('utf8');
+      const sep = decoded.indexOf(':');
+      const user = decoded.slice(0, sep);
+      const pass = decoded.slice(sep + 1);
+
+      // Evaluate both comparisons regardless, to keep timing uniform.
+      const userOk = safeEqual(user, BASIC_AUTH_USER);
+      const passOk = safeEqual(pass, BASIC_AUTH_PASS);
+      if (userOk && passOk) return next();
+    }
+
+    res.set('WWW-Authenticate', 'Basic realm="Melsoft Blog Agent", charset="UTF-8"');
+    return res.status(401).send('Authentication required.');
+  });
+  console.log('[auth] HTTP Basic Auth gate ENABLED.');
+} else {
+  console.warn('[auth] BASIC_AUTH_USER/PASS not set — pages and API are OPEN. Fine for local dev; set both before a public deploy.');
+}
 
 // Serve static files from the public folder
 app.use(express.static('public'));

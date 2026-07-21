@@ -1,0 +1,1940 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Melsoft Academy — Blog Admin Dashboard</title>
+  
+  <!-- Fonts -->
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,500..700&family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+
+  <!-- Supabase CDN -->
+  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+  
+  <style>
+    /* ============================================================
+       PROTECTED — do not rename/remove (referenced by <script> JS).
+       IDs: login-view, list-view, detail-view, logout-btn,
+         user-display-email, status-banner, status-banner-text,
+         login-form, login-email, login-password, login-submit-btn,
+         refresh-btn, drafts-list, drafts-loading, drafts-empty,
+         edit-title, edit-excerpt, edit-category, edit-post-date,
+         edit-author, edit-author-role, edit-tint, edit-image-file,
+         editor-title-text, editor-subtitle-text, upload-placeholder,
+         image-upload-progress, image-preview-container, image-preview-img,
+         preview-art-title-text, preview-meta-category, preview-meta-date,
+         preview-author-name, preview-author-role, preview-featured-image-img,
+         preview-art-body-container, article-preview-container, save-btn, publish-btn
+       Classes (JS-toggled / JS-generated): view-container, active, status-banner,
+         success, error, spinner, draft-card, card-preview-bar, tint-sky-preview,
+         tint-peach-preview, tint-mint-preview, tint-lilac-preview, draft-card-header,
+         draft-card-date, draft-card-title, draft-card-excerpt, draft-card-actions,
+         btn, btn-primary, btn-secondary, btn-sm
+       JS-set inline display values (CSS must stay compatible): upload-placeholder=flex,
+         logout-btn=flex, image-preview-container=block, user-display-email=block,
+         drafts-loading=block, drafts-empty=block, image-upload-progress=block,
+         preview-featured-image-img=block
+       DATA CONTRACT (frozen): #edit-tint <option> value="var(--tint-sky|peach|mint|lilac)";
+         CSS vars --tint-sky/peach/mint/lilac and .tint-*-preview names must not change.
+       ============================================================ */
+    :root {
+      /* ── Primitives — Melsoft Visual Brand Guide ─────────────── */
+      --ink: #0a1733;        /* Primary: dark blue */
+      --ink-deep: #060e22;
+      --ink-2: #1a2545;
+      --maroon: #5e0743;     /* Secondary */
+      --orange: #ff7300;     /* Tertiary accent */
+      --purple: #720075;     /* Tertiary accent */
+
+      /* Light-surface text & lines (Academy site values) */
+      --text-2: #5b6478;
+      --text-3: #8a93a8;
+      --line: #e5e8f0;
+      --line-2: #ccd2df;
+      --surface: #f7f8fb;
+      --surface-2: #eef1f7;
+      --bg: #ffffff;
+
+      /* Dark-console derivatives (dashboard theme) */
+      --d-bg: #060e22;
+      --d-surface: rgba(255, 255, 255, 0.03);
+      --d-surface-2: rgba(255, 255, 255, 0.06);
+      --d-line: rgba(255, 255, 255, 0.10);
+      --d-line-strong: rgba(255, 255, 255, 0.16);
+      --d-text: #eef1f7;
+      --d-text-2: rgba(255, 255, 255, 0.66);
+      --d-text-3: rgba(255, 255, 255, 0.45);
+
+      /* Approved brand gradients only */
+      --grad-ink: linear-gradient(120deg, #0a1733 0%, #5e0743 46%, #ff7300 100%);
+      --grad-ink-soft: linear-gradient(120deg, #720075 0%, #5e0743 55%, #ff7300 100%);
+      --grad-black-maroon: linear-gradient(135deg, #060e22 0%, #5e0743 100%);
+      --grad-black-purple: linear-gradient(135deg, #060e22 0%, #720075 100%);
+
+      /* Card tints — names frozen by data contract; values match the Academy site */
+      --tint-sky: #dde6f8;
+      --tint-peach: #ffe6d1;
+      --tint-mint: #d5efe2;
+      --tint-lilac: #eadbf6;
+
+      /* Radius & elevation (Academy scale) */
+      --radius-sm: 12px;
+      --radius-md: 16px;
+      --radius-lg: 24px;
+      --radius-xl: 34px;
+      --rad-pill: 100px;
+      --shadow-soft: 0 6px 24px -12px rgba(10, 23, 51, 0.16);
+      --shadow-lifted: 0 26px 50px -20px rgba(10, 23, 51, 0.28);
+      --shadow-deep: 0 34px 80px -28px rgba(10, 23, 51, 0.42);
+
+      /* Motion */
+      --ease-lift: cubic-bezier(0.16, 1, 0.3, 1);
+
+      /* Semantic status — kept semantic on purpose */
+      --status-success: #22c55e;
+      --status-success-soft: rgba(34, 197, 94, 0.12);
+      --status-error: #ef4444;
+      --status-error-soft: rgba(239, 68, 68, 0.12);
+
+      /* Font stacks */
+      --font-display: 'Fraunces', Georgia, 'Times New Roman', serif;
+      --font-body: 'Inter', system-ui, -apple-system, sans-serif;
+      --font-mono: ui-monospace, 'SFMono-Regular', Menlo, monospace;
+
+      /* Legacy aliases referenced by inline style="" attributes in the static
+         markup (dark console values). Not used by the rules below — kept only so
+         those inline styles keep resolving. Do not remove. */
+      --text-primary: var(--d-text);
+      --text-secondary: var(--d-text-2);
+      --text-muted: var(--d-text-3);
+      --border-color: var(--d-line);
+    }
+
+    * {
+      box-sizing: border-box;
+      margin: 0;
+      padding: 0;
+    }
+
+    body {
+      font-family: var(--font-body);
+      background:
+        radial-gradient(1200px 620px at 10% -8%, rgba(94, 7, 67, 0.11), transparent 60%),
+        radial-gradient(1000px 620px at 90% 108%, rgba(114, 0, 117, 0.10), transparent 62%),
+        var(--d-bg);
+      background-attachment: fixed;
+      color: var(--d-text);
+      min-height: 100vh;
+      display: flex;
+      flex-direction: column;
+      line-height: 1.5;
+      -webkit-font-smoothing: antialiased;
+    }
+
+
+    /* Common Layout & Header */
+    header {
+      background-color: var(--ink-deep);
+      border-bottom: 1px solid var(--d-line);
+      padding: 1rem 2rem;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      position: sticky;
+      top: 0;
+      z-index: 100;
+    }
+
+    .logo-container {
+      display: flex;
+      align-items: center;
+      gap: 0.85rem;
+    }
+
+    .logo-badge {
+      height: 60px;
+      width: auto;
+      flex: none;
+      display: block;
+      object-fit: contain;
+    }
+
+    .logo-text {
+      font-family: var(--font-display);
+      font-size: 1.4rem;
+      font-weight: 600;
+      letter-spacing: -0.01em;
+      color: var(--d-text);
+      line-height: 1;
+    }
+
+    .logo-subtitle {
+      font-family: var(--font-mono);
+      font-size: 0.66rem;
+      font-weight: 600;
+      letter-spacing: 0.18em;
+      text-transform: uppercase;
+      color: var(--d-text-3);
+      margin-left: 0.5rem;
+    }
+
+    .nav-actions {
+      display: flex;
+      align-items: center;
+      gap: 1rem;
+    }
+
+    /* Buttons */
+    .btn {
+      font-family: var(--font-body);
+      font-size: 0.86rem;
+      font-weight: 600;
+      padding: 0.6rem 1.25rem;
+      border-radius: var(--rad-pill);
+      border: 1.5px solid transparent;
+      cursor: pointer;
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      gap: 0.5rem;
+      white-space: nowrap;
+      transition: transform 0.18s var(--ease-lift), background-color 0.18s ease, border-color 0.18s ease, box-shadow 0.18s ease, filter 0.18s ease;
+    }
+
+    .btn-primary {
+      background-color: var(--orange);
+      color: var(--ink);
+    }
+
+    .btn-primary:hover {
+      filter: brightness(0.93);
+      transform: translateY(-1px);
+      box-shadow: 0 12px 24px -14px rgba(255, 115, 0, 0.7);
+    }
+
+    .btn-secondary {
+      background-color: transparent;
+      border-color: var(--d-line-strong);
+      color: var(--d-text);
+    }
+
+    .btn-secondary:hover {
+      background-color: var(--d-surface-2);
+      border-color: var(--d-text-3);
+      transform: translateY(-1px);
+    }
+
+    .btn-danger {
+      background-color: var(--status-error-soft);
+      border-color: var(--status-error);
+      color: var(--status-error);
+    }
+
+    .btn-danger:hover {
+      background-color: var(--status-error);
+      color: #fff;
+    }
+
+    .btn-sm {
+      padding: 0.45rem 0.95rem;
+      font-size: 0.8rem;
+    }
+
+    .btn:disabled {
+      opacity: 0.5;
+      cursor: not-allowed;
+      transform: none;
+      filter: none;
+      box-shadow: none;
+    }
+
+    /* Notifications & Status Banner */
+    .status-banner {
+      padding: 0.9rem 2rem;
+      display: none;
+      align-items: center;
+      gap: 0.75rem;
+      font-size: 0.86rem;
+      font-weight: 500;
+      border-bottom: 1px solid var(--d-line);
+      animation: slideDown 0.3s var(--ease-lift);
+    }
+
+    .status-banner.success {
+      display: flex;
+      background-color: var(--status-success-soft);
+      border-bottom-color: var(--status-success);
+      color: var(--status-success);
+    }
+
+    .status-banner.error {
+      display: flex;
+      background-color: var(--status-error-soft);
+      border-bottom-color: var(--status-error);
+      color: var(--status-error);
+    }
+
+    /* Main Container */
+    main {
+      flex: 1;
+      padding: 2.5rem 2rem;
+      max-width: 1400px;
+      width: 100%;
+      margin: 0 auto;
+      display: flex;
+      flex-direction: column;
+    }
+
+    /* View classes */
+    .view-container {
+      display: none;
+      width: 100%;
+    }
+
+    .view-container.active {
+      display: block;
+    }
+
+    /* LOGIN VIEW */
+    #login-view {
+      margin: auto;
+      max-width: 440px;
+      width: 100%;
+      padding: 3rem 0;
+    }
+
+    .login-card {
+      background-color: var(--d-surface-2);
+      border: 1px solid var(--d-line-strong);
+      border-radius: var(--radius-lg);
+      padding: 2.75rem;
+      box-shadow: var(--shadow-deep);
+      backdrop-filter: blur(10px);
+      -webkit-backdrop-filter: blur(10px);
+    }
+
+    .login-header {
+      text-align: center;
+      margin-bottom: 2rem;
+    }
+
+    .login-header h2 {
+      font-family: var(--font-display);
+      font-size: 1.9rem;
+      font-weight: 600;
+      margin-bottom: 0.5rem;
+      color: var(--d-text);
+    }
+
+    .login-header p {
+      color: var(--d-text-2);
+      font-size: 0.9rem;
+    }
+
+    /* Forms & Inputs */
+    .form-group {
+      margin-bottom: 1.2rem;
+    }
+
+    .form-group label {
+      display: block;
+      font-family: var(--font-mono);
+      font-size: 0.7rem;
+      font-weight: 600;
+      letter-spacing: 0.12em;
+      text-transform: uppercase;
+      margin-bottom: 0.5rem;
+      color: var(--d-text-3);
+    }
+
+    .input-field {
+      width: 100%;
+      background-color: var(--d-surface);
+      border: 1px solid var(--d-line-strong);
+      color: var(--d-text);
+      padding: 0.75rem 1rem;
+      border-radius: var(--radius-sm);
+      font-family: var(--font-body);
+      font-size: 0.9rem;
+      outline: none;
+      transition: border-color 0.18s ease, box-shadow 0.18s ease, background-color 0.18s ease;
+    }
+
+    .input-field::placeholder {
+      color: var(--d-text-3);
+    }
+
+    .input-field:focus {
+      border-color: var(--orange);
+      box-shadow: 0 0 0 4px rgba(255, 115, 0, 0.15);
+      background-color: var(--d-surface-2);
+    }
+
+    textarea.input-field {
+      resize: vertical;
+      min-height: 110px;
+    }
+
+    /* DRAFT LIST VIEW */
+    .list-header {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      margin-bottom: 2rem;
+      gap: 1rem;
+      flex-wrap: wrap;
+    }
+
+    .list-header h2 {
+      font-family: var(--font-display);
+      font-size: 1.9rem;
+      font-weight: 600;
+      color: var(--d-text);
+    }
+
+    .drafts-grid {
+      display: grid;
+      grid-template-columns: repeat(3, minmax(0, 1fr));
+      gap: 1.5rem;
+    }
+
+    .draft-card {
+      background-color: var(--d-surface);
+      border: 1px solid var(--d-line);
+      border-radius: var(--radius-md);
+      padding: 1.6rem 1.5rem 1.4rem;
+      display: flex;
+      flex-direction: column;
+      transition: transform 0.22s var(--ease-lift), background-color 0.22s ease, border-color 0.22s ease, box-shadow 0.22s ease;
+      position: relative;
+      overflow: hidden;
+    }
+
+    .draft-card:hover {
+      transform: translateY(-4px);
+      background-color: var(--d-surface-2);
+      border-color: var(--d-line-strong);
+      box-shadow: var(--shadow-deep);
+    }
+
+    .draft-card-header {
+      display: flex;
+      justify-content: space-between;
+      align-items: flex-start;
+      margin-top: 0.4rem;
+      margin-bottom: 0.9rem;
+    }
+
+    .draft-card-date {
+      font-family: var(--font-mono);
+      font-size: 0.68rem;
+      letter-spacing: 0.1em;
+      text-transform: uppercase;
+      color: var(--d-text-3);
+      font-weight: 600;
+    }
+
+    .draft-card-title {
+      font-family: var(--font-display);
+      font-size: 1.2rem;
+      font-weight: 600;
+      line-height: 1.35;
+      margin-bottom: 0.65rem;
+      color: var(--d-text);
+    }
+
+    .draft-card-excerpt {
+      font-size: 0.88rem;
+      color: var(--d-text-2);
+      line-height: 1.55;
+      margin-bottom: 1.4rem;
+      flex: 1;
+      display: -webkit-box;
+      -webkit-line-clamp: 3;
+      -webkit-box-orient: vertical;
+      overflow: hidden;
+    }
+
+    .draft-card-actions {
+      border-top: 1px solid var(--d-line);
+      padding-top: 1rem;
+      display: flex;
+      justify-content: flex-end;
+    }
+
+    .empty-state {
+      text-align: center;
+      padding: 4rem 2rem;
+      background-color: var(--d-surface);
+      border: 1px dashed var(--d-line-strong);
+      border-radius: var(--radius-md);
+      max-width: 520px;
+      margin: 2rem auto;
+    }
+
+    .empty-state-title {
+      font-family: var(--font-display);
+      font-size: 1.3rem;
+      font-weight: 600;
+      margin-bottom: 0.5rem;
+      color: var(--d-text);
+    }
+
+    .empty-state-desc {
+      color: var(--d-text-2);
+      font-size: 0.9rem;
+    }
+
+    /* DRAFT DETAIL / EDIT VIEW */
+    .editor-header {
+      display: flex;
+      align-items: center;
+      gap: 1.5rem;
+      margin-bottom: 2rem;
+      border-bottom: 1px solid var(--d-line);
+      padding-bottom: 1.25rem;
+      flex-wrap: wrap;
+    }
+
+    .editor-header-title {
+      flex: 1;
+      min-width: 220px;
+    }
+
+    .editor-header-title h2 {
+      font-family: var(--font-display);
+      font-size: 1.8rem;
+      font-weight: 600;
+      margin-bottom: 0.25rem;
+      color: var(--d-text);
+    }
+
+    .editor-layout {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 2.5rem;
+      align-items: start;
+    }
+
+    /* Left Side: Form Edit Panel */
+    .edit-panel {
+      background-color: var(--d-surface);
+      border: 1px solid var(--d-line);
+      border-radius: var(--radius-lg);
+      padding: 2rem;
+    }
+
+    .edit-panel-section-title {
+      font-family: var(--font-mono);
+      font-size: 0.72rem;
+      font-weight: 700;
+      letter-spacing: 0.16em;
+      text-transform: uppercase;
+      color: var(--d-text-2);
+      margin-bottom: 1.25rem;
+      padding-bottom: 0.6rem;
+      border-bottom: 1px solid var(--d-line);
+      display: flex;
+      align-items: center;
+      gap: 0.55rem;
+    }
+
+    .edit-panel-section-title::before {
+      content: '';
+      width: 14px;
+      height: 3px;
+      border-radius: 2px;
+      background: var(--orange);
+      flex: none;
+    }
+
+    .form-row {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 1rem;
+    }
+
+    /* Dropdown Styles */
+    .select-field {
+      width: 100%;
+      background-color: var(--d-surface);
+      border: 1px solid var(--d-line-strong);
+      color: var(--d-text);
+      padding: 0.75rem 1rem;
+      border-radius: var(--radius-sm);
+      font-family: var(--font-body);
+      font-size: 0.9rem;
+      outline: none;
+      cursor: pointer;
+      appearance: none;
+      background-image: url("data:image/svg+xml;charset=utf-8,%3Csvg xmlns='http://www.w3.org/2000/svg' fill='none' viewBox='0 0 20 20'%3E%3Cpath stroke='%238a93a8' stroke-linecap='round' stroke-linejoin='round' stroke-width='1.5' d='M6 8l4 4 4-4'/%3E%3C/svg%3E");
+      background-position: right 0.85rem center;
+      background-size: 1.15rem;
+      background-repeat: no-repeat;
+      padding-right: 2.5rem;
+      transition: border-color 0.18s ease, box-shadow 0.18s ease;
+    }
+
+    .select-field:focus {
+      border-color: var(--orange);
+      box-shadow: 0 0 0 4px rgba(255, 115, 0, 0.15);
+    }
+
+    .select-field option {
+      background-color: var(--ink-deep);
+      color: var(--d-text);
+    }
+
+    /* Uploader & Feature Image Section */
+    .image-upload-area {
+      border: 2px dashed var(--d-line-strong);
+      border-radius: var(--radius-sm);
+      padding: 1.5rem;
+      text-align: center;
+      cursor: pointer;
+      transition: border-color 0.18s ease, background-color 0.18s ease;
+      background-color: var(--d-surface);
+      position: relative;
+    }
+
+    .image-upload-area:hover {
+      border-color: var(--orange);
+      background-color: rgba(255, 115, 0, 0.05);
+    }
+
+    .image-upload-area input[type="file"] {
+      position: absolute;
+      top: 0;
+      left: 0;
+      width: 100%;
+      height: 100%;
+      opacity: 0;
+      cursor: pointer;
+    }
+
+    .image-preview-container {
+      margin-top: 1rem;
+      position: relative;
+      border-radius: var(--radius-sm);
+      overflow: hidden;
+      aspect-ratio: 16/9;
+      border: 1px solid var(--d-line);
+      background-color: var(--ink-deep);
+      display: none;
+    }
+
+    .image-preview-container img {
+      width: 100%;
+      height: 100%;
+      object-fit: cover;
+    }
+
+    .image-upload-placeholder {
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      gap: 0.5rem;
+      color: var(--d-text-2);
+    }
+
+    .image-upload-placeholder svg {
+      width: 32px;
+      height: 32px;
+      color: var(--d-text-3);
+    }
+
+    .image-upload-label {
+      font-size: 0.9rem;
+      font-weight: 600;
+      color: var(--orange);
+    }
+
+    .image-upload-subtext {
+      font-size: 0.75rem;
+      color: var(--d-text-3);
+    }
+
+    /* Right Side: Live Article Preview — the canvas stays white (previews the
+       public Melsoft Academy blog post), framed to float off the dark console. */
+    .preview-panel {
+      position: sticky;
+      top: 100px;
+      height: calc(100vh - 160px);
+      display: flex;
+      flex-direction: column;
+    }
+
+    .preview-panel-header {
+      font-family: var(--font-mono);
+      font-size: 0.72rem;
+      font-weight: 700;
+      letter-spacing: 0.16em;
+      text-transform: uppercase;
+      color: var(--d-text-2);
+      margin-bottom: 1rem;
+      display: flex;
+      align-items: center;
+      gap: 0.6rem;
+    }
+
+    .preview-panel-header span {
+      background-color: rgba(255, 115, 0, 0.12);
+      color: var(--orange);
+      font-size: 0.66rem;
+      font-weight: 700;
+      padding: 0.25rem 0.6rem;
+      border-radius: var(--rad-pill);
+      text-transform: uppercase;
+      letter-spacing: 0.1em;
+    }
+
+    .preview-container {
+      flex: 1;
+      background-color: var(--bg);
+      color: var(--ink-2);
+      border-radius: var(--radius-lg);
+      border: 1px solid var(--line);
+      padding: 2.5rem;
+      overflow-y: auto;
+      box-shadow: var(--shadow-deep);
+    }
+
+    /* Article Preview Rendering Typography styles */
+    .preview-art-header {
+      margin-bottom: 2rem;
+      padding-bottom: 1.5rem;
+      border-bottom: 1px solid var(--line);
+    }
+
+    .preview-art-meta {
+      display: flex;
+      align-items: center;
+      gap: 0.75rem;
+      font-family: var(--font-mono);
+      font-size: 0.78rem;
+      letter-spacing: 0.03em;
+      color: var(--text-2);
+      margin-bottom: 0.85rem;
+      font-weight: 500;
+    }
+
+    .preview-art-category {
+      background-color: var(--surface-2);
+      color: var(--maroon);
+      padding: 0.28rem 0.6rem;
+      border-radius: var(--rad-pill);
+      text-transform: uppercase;
+      font-size: 0.68rem;
+      font-weight: 700;
+      letter-spacing: 0.08em;
+    }
+
+    .preview-art-title {
+      font-family: var(--font-display);
+      font-size: 2.1rem;
+      font-weight: 600;
+      line-height: 1.2;
+      letter-spacing: -0.01em;
+      color: var(--ink);
+      margin-bottom: 1rem;
+    }
+
+    .preview-art-author-info {
+      display: flex;
+      align-items: center;
+      gap: 0.4rem;
+      font-size: 0.875rem;
+      color: var(--text-2);
+    }
+
+    .preview-art-author-info strong {
+      color: var(--ink);
+      font-weight: 600;
+    }
+
+    .preview-art-featured-image {
+      width: 100%;
+      max-height: 280px;
+      object-fit: cover;
+      border-radius: var(--radius-md);
+      margin-bottom: 2rem;
+      display: none;
+    }
+
+    .preview-art-body {
+      font-size: 1.05rem;
+      line-height: 1.75;
+      color: var(--ink-2);
+    }
+
+    .preview-art-body h2 {
+      font-family: var(--font-display);
+      font-size: 1.5rem;
+      font-weight: 600;
+      color: var(--ink);
+      margin: 2rem 0 1rem 0;
+    }
+
+    .preview-art-body h3 {
+      font-family: var(--font-display);
+      font-size: 1.22rem;
+      font-weight: 600;
+      color: var(--ink-2);
+      margin: 1.5rem 0 0.75rem 0;
+    }
+
+    .preview-art-body p {
+      margin-bottom: 1.25rem;
+      color: var(--ink-2);
+    }
+
+    .preview-art-body blockquote {
+      border-left: 4px solid var(--maroon);
+      padding: 0.75rem 1.25rem;
+      margin: 1.5rem 0;
+      background-color: var(--surface);
+      border-radius: 0 var(--radius-sm) var(--radius-sm) 0;
+    }
+
+    .preview-art-body blockquote p {
+      font-style: italic;
+      color: var(--ink);
+      margin-bottom: 0.5rem;
+    }
+
+    .preview-art-body blockquote cite {
+      font-size: 0.875rem;
+      color: var(--text-2);
+      display: block;
+      font-style: normal;
+      font-weight: 500;
+    }
+
+    .preview-art-body ul, .preview-art-body ol {
+      margin: 1.25rem 0 1.25rem 1.5rem;
+    }
+
+    .preview-art-body li {
+      margin-bottom: 0.5rem;
+      color: var(--ink-2);
+    }
+
+    /* Sticky Editor Footer Actions */
+    .editor-footer {
+      margin-top: 2rem;
+      display: flex;
+      justify-content: flex-end;
+      gap: 1rem;
+      border-top: 1px solid var(--d-line);
+      padding-top: 1.5rem;
+    }
+
+    /* Card Preview rail — the JS-driven tint signature at the top of each card */
+    .card-preview-bar {
+      height: 5px;
+      border-radius: var(--radius-md) var(--radius-md) 0 0;
+      width: 100%;
+      position: absolute;
+      top: 0;
+      left: 0;
+    }
+
+    /* Apply tints dynamically */
+    .tint-sky-preview { background-color: var(--tint-sky); }
+    .tint-peach-preview { background-color: var(--tint-peach); }
+    .tint-mint-preview { background-color: var(--tint-mint); }
+    .tint-lilac-preview { background-color: var(--tint-lilac); }
+
+    /* Keyframes */
+    @keyframes slideDown {
+      from { transform: translateY(-10px); opacity: 0; }
+      to { transform: translateY(0); opacity: 1; }
+    }
+
+    /* Utility Spinner */
+    .spinner {
+      border: 3px solid var(--d-line-strong);
+      width: 20px;
+      height: 20px;
+      border-radius: 50%;
+      border-left-color: var(--orange);
+      animation: spin 1s linear infinite;
+      display: inline-block;
+      vertical-align: middle;
+    }
+
+    /* On the orange primary buttons an orange spinner would vanish — swap to ink */
+    .btn-primary .spinner {
+      border-color: rgba(10, 23, 51, 0.28);
+      border-left-color: var(--ink);
+    }
+
+    @keyframes spin {
+      0% { transform: rotate(0deg); }
+      100% { transform: rotate(360deg); }
+    }
+
+    /* Focus visibility — never remove an outline without a replacement */
+    :focus-visible {
+      outline: 2px solid var(--orange);
+      outline-offset: 2px;
+      border-radius: 3px;
+    }
+
+    .input-field:focus-visible,
+    .select-field:focus-visible {
+      outline: none;
+    }
+
+    /* Responsive */
+    @media (max-width: 1080px) {
+      .drafts-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+      .editor-layout {
+        grid-template-columns: 1fr;
+        gap: 1.75rem;
+      }
+      .preview-panel {
+        position: static;
+        height: auto;
+      }
+    }
+
+    @media (max-width: 680px) {
+      header { padding: 1rem 1.25rem; }
+      main { padding: 1.75rem 1.25rem; }
+      .status-banner { padding: 0.9rem 1.25rem; }
+      .edit-panel { padding: 1.5rem; }
+      .form-row { grid-template-columns: 1fr; }
+      .drafts-grid { grid-template-columns: 1fr; }
+    }
+
+    @media (max-width: 420px) {
+      .logo-subtitle { display: none; }
+      .preview-container { padding: 1.5rem; }
+    }
+
+    @media (prefers-reduced-motion: reduce) {
+      *, *::before, *::after {
+        animation: none !important;
+        transition: none !important;
+        scroll-behavior: auto !important;
+      }
+    }
+
+    /* ============================================================
+       BRAND REDESIGN LAYER — Melsoft light editorial theme.
+       Append-only override: no existing rule, ID, class, data-contract
+       value, or script hook is renamed or removed. The dark console is
+       re-themed to the light brand system by (a) re-pointing the --d-*
+       surface/text tokens to light values so every existing rule
+       recolours in place, and (b) a few scoped fixes where the header
+       stays a dark brand bar (the wordmark asset is white-on-transparent).
+       ============================================================ */
+
+    /* Brand display face. The Canela trial file may be absent in this
+       project; Fraunces (already loaded in <head>) is the visual stand-in. */
+    @font-face {
+      font-family: "Canela";
+      src: url("/canela-collection/Canela Family/Canela-Bold-Trial.otf") format("opentype");
+      font-weight: bold;
+      font-style: normal;
+      font-display: swap;
+    }
+
+    :root {
+      /* Lead with Canela, fall back to the already-loaded Fraunces. */
+      --font-display: 'Canela', 'Fraunces', Georgia, 'Times New Roman', serif;
+
+      /* Re-point the dark-console tokens to light brand surfaces so every
+         existing rule that references them renders light. */
+      --d-bg: var(--bg);
+      --d-surface: #ffffff;
+      --d-surface-2: var(--surface-2);
+      --d-line: var(--line);
+      --d-line-strong: var(--line-2);
+      --d-text: var(--ink);
+      --d-text-2: var(--text-2);
+      --d-text-3: var(--text-3);
+
+      /* Legacy aliases referenced by inline style="" attributes. */
+      --text-primary: var(--ink);
+      --text-secondary: var(--text-2);
+      --text-muted: var(--text-3);
+      --border-color: var(--line);
+    }
+
+    /* Global heading face + brand tracking. */
+    h1, h2, h3, h4, h5, h6 {
+      font-family: var(--font-display);
+      letter-spacing: -0.018em;
+    }
+
+    /* Light, brand-tinted page canvas. */
+    body {
+      background:
+        radial-gradient(1100px 560px at 100% -10%, rgba(114, 0, 117, 0.06), transparent 60%),
+        radial-gradient(900px 560px at -10% 110%, rgba(255, 115, 0, 0.05), transparent 60%),
+        var(--surface);
+      background-attachment: fixed;
+      color: var(--ink);
+    }
+
+    /* ── Header: keep it a dark brand bar so the white wordmark reads. ── */
+    header {
+      background: linear-gradient(180deg, #0a1733 0%, #060e22 100%);
+      border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+    }
+    .logo-subtitle { color: rgba(255, 255, 255, 0.5); }
+    header #user-display-email { color: rgba(255, 255, 255, 0.72) !important; }
+    header .btn-secondary {
+      color: #ffffff;
+      border-color: rgba(255, 255, 255, 0.24);
+      background: transparent;
+    }
+    header .btn-secondary:hover {
+      background: rgba(255, 255, 255, 0.08);
+      border-color: rgba(255, 255, 255, 0.42);
+      transform: translateY(-1px);
+    }
+
+    /* ── Primary action = brand ink; orange stays the accent (rails,
+       section ticks, focus rings, the Canvas pill). ── */
+    .btn-primary {
+      background-color: var(--ink);
+      color: #ffffff;
+    }
+    .btn-primary:hover {
+      background-color: var(--ink-2);
+      filter: none;
+      transform: translateY(-1px);
+      box-shadow: 0 14px 28px -16px rgba(10, 23, 51, 0.55);
+    }
+    .btn-primary .spinner {
+      border-color: rgba(255, 255, 255, 0.35);
+      border-left-color: #ffffff;
+    }
+
+    /* ── Surfaces: crisp white cards floating on the tinted canvas. ── */
+    .login-card {
+      background-color: #ffffff;
+      border-color: var(--line);
+      box-shadow: var(--shadow-lifted);
+      backdrop-filter: none;
+      -webkit-backdrop-filter: none;
+    }
+    .form-group label { color: var(--text-2); }
+    .draft-card:hover { box-shadow: var(--shadow-lifted); }
+
+    /* Native dropdown options must be readable on the now-light control. */
+    .select-field option {
+      background-color: #ffffff;
+      color: var(--ink);
+    }
+
+    /* Live-preview "paper" canvas floats a touch more softly on white. */
+    .preview-container { box-shadow: var(--shadow-lifted); }
+
+    /* ============================================================
+       PODSCRAPE GRADIENT THEME — final override layer.
+       Re-skins the admin to the deep navy→black→maroon gradient with
+       purple/maroon accents and dark glass surfaces. Append-only: no
+       markup, ID, class, script hook or frozen data-contract value is
+       changed. It comes last, so it re-themes the earlier light layer in
+       place — re-pointing tokens and overriding the hard-coded surfaces. */
+    :root {
+      /* Console tokens → dark glass (PodScrape-tuned). */
+      --d-bg: #0a0a0b;
+      --d-surface: rgba(255, 255, 255, 0.035);
+      --d-surface-2: rgba(255, 255, 255, 0.06);
+      --d-line: rgba(255, 255, 255, 0.10);
+      --d-line-strong: rgba(114, 0, 117, 0.30);
+      --d-text: #f0f0f2;
+      --d-text-2: rgba(255, 255, 255, 0.66);
+      --d-text-3: rgba(255, 255, 255, 0.45);
+      --text-primary: var(--d-text);
+      --text-secondary: var(--d-text-2);
+      --text-muted: var(--d-text-3);
+      --border-color: var(--d-line);
+      /* Unify accents on the PodScrape purple. */
+      --orange: #720075;
+    }
+
+    /* Deep gradient canvas + ambient glow orbs. */
+    body {
+      background: linear-gradient(160deg, #0a1733 0%, #000000 45%, #3a0230 75%, #5e0743 100%);
+      background-attachment: fixed;
+      background-repeat: no-repeat;
+      background-size: cover;
+      color: var(--d-text);
+    }
+    body::before {
+      content: '';
+      position: fixed;
+      top: -20%; left: 50%;
+      transform: translateX(-50%);
+      width: 900px; height: 600px;
+      background: radial-gradient(ellipse at center, rgba(114, 0, 117, 0.18) 0%, transparent 70%);
+      pointer-events: none; z-index: 0;
+    }
+    body::after {
+      content: '';
+      position: fixed;
+      bottom: -10%; right: -10%;
+      width: 600px; height: 600px;
+      background: radial-gradient(ellipse at center, rgba(94, 7, 67, 0.15) 0%, transparent 70%);
+      pointer-events: none; z-index: 0;
+    }
+    .status-banner, main { position: relative; z-index: 1; }
+
+    /* Header: deep glass bar with a purple hairline. */
+    header {
+      background: linear-gradient(180deg, rgba(10, 23, 51, 0.92) 0%, rgba(6, 14, 34, 0.94) 100%);
+      border-bottom: 1px solid rgba(114, 0, 117, 0.28);
+      -webkit-backdrop-filter: blur(12px);
+      backdrop-filter: blur(12px);
+    }
+
+    /* Cards & panels → dark glass with purple-tinted edges. */
+    .login-card, .edit-panel {
+      background: rgba(17, 17, 20, 0.55);
+      border: 1px solid rgba(114, 0, 117, 0.22);
+      -webkit-backdrop-filter: blur(16px);
+      backdrop-filter: blur(16px);
+      box-shadow: 0 24px 60px -30px rgba(0, 0, 0, 0.7);
+    }
+    .draft-card { background: rgba(255, 255, 255, 0.03); border-color: rgba(255, 255, 255, 0.08); }
+    .draft-card:hover {
+      background: rgba(255, 255, 255, 0.05);
+      border-color: rgba(114, 0, 117, 0.5);
+      box-shadow: 0 24px 60px -30px rgba(114, 0, 117, 0.45);
+    }
+    .empty-state { background: rgba(255, 255, 255, 0.02); border-color: rgba(255, 255, 255, 0.14); }
+
+    /* Inputs → dark glass with a purple focus glow. */
+    .input-field, textarea.input-field, .select-field {
+      background: rgba(0, 0, 0, 0.35);
+      border-color: rgba(114, 0, 117, 0.25);
+      color: #ffffff;
+    }
+    .input-field:focus, textarea.input-field:focus, .select-field:focus {
+      border-color: rgba(114, 0, 117, 0.7);
+      box-shadow: 0 0 0 3px rgba(114, 0, 117, 0.14), 0 0 20px rgba(114, 0, 117, 0.15);
+      background: rgba(0, 0, 0, 0.45);
+    }
+    .select-field option { background-color: #14141a; color: #f0f0f2; }
+    .form-group label { color: rgba(255, 255, 255, 0.6); }
+    .image-upload-area:hover { border-color: #720075; background: rgba(114, 0, 117, 0.06); }
+    .preview-panel-header span { background: rgba(114, 0, 117, 0.16); color: #c65cff; }
+
+    /* Primary action → purple→maroon gradient with glow (the scrape-button). */
+    .btn-primary {
+      background: linear-gradient(135deg, #720075, #5e0743);
+      color: #ffffff;
+      border: 1px solid rgba(114, 0, 117, 0.4);
+    }
+    .btn-primary:hover {
+      background: linear-gradient(135deg, #7d0080, #6a0a4d);
+      border-color: rgba(114, 0, 117, 0.9);
+      box-shadow: 0 0 16px 2px rgba(114, 0, 117, 0.5), 0 0 40px 6px rgba(114, 0, 117, 0.25), 0 8px 32px rgba(94, 7, 67, 0.4);
+      transform: translateY(-2px);
+      filter: none;
+    }
+    .btn-primary .spinner { border-color: rgba(255, 255, 255, 0.35); border-left-color: #ffffff; }
+
+    /* The live-preview stays a bright "paper" sheet — a deliberate contrast on
+       the dark console (it previews the public, light blog page). Left as-is. */
+  </style>
+</head>
+<body>
+
+  <!-- Header -->
+  <header>
+    <div class="logo-container">
+      <img class="logo-badge" src="assets/logo-dark.png" alt="Melsoft">
+      <div class="logo-subtitle">Draft Review Console</div>
+    </div>
+    
+    <div class="nav-actions">
+      <!-- Action buttons dynamically shown on auth state -->
+      <span id="user-display-email" style="font-size: 0.875rem; color: var(--text-secondary); display: none;"></span>
+      <button type="button" id="logout-btn" class="btn btn-secondary" style="display: none;">Log out</button>
+    </div>
+  </header>
+
+  <!-- Status banner for feedback messages -->
+  <div id="status-banner" class="status-banner">
+    <span id="status-banner-text"></span>
+  </div>
+
+  <main>
+    
+    <!-- 1. LOGIN VIEW -->
+    <div id="login-view" class="view-container">
+      <div class="login-card">
+        <div class="login-header">
+          <h2>Sign In</h2>
+          <p>Please enter your admin credentials to access draft reviews</p>
+        </div>
+        <form id="login-form" onsubmit="handleLogin(event)">
+          <div class="form-group">
+            <label for="login-email">Email Address</label>
+            <input type="email" id="login-email" class="input-field" placeholder="admin@melsoft.co.za" required>
+          </div>
+          <div class="form-group">
+            <label for="login-password">Password</label>
+            <input type="password" id="login-password" class="input-field" placeholder="••••••••" required>
+          </div>
+          <button type="submit" id="login-submit-btn" class="btn btn-primary" style="width: 100%; margin-top: 1rem;">
+            Log in
+          </button>
+        </form>
+      </div>
+    </div>
+
+    <!-- 2. DRAFT LIST VIEW -->
+    <div id="list-view" class="view-container">
+      <div class="list-header">
+        <h2>Pending Drafts</h2>
+        <div style="display: flex; gap: 0.75rem;">
+          <button type="button" id="refresh-btn" class="btn btn-secondary" onclick="loadDrafts(event)">
+            <svg width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path d="M4 4v5h.582m15.356 2A8.001 8.001 0 1121.21 8H18" stroke-linecap="round" stroke-linejoin="round"/></svg>
+            Refresh
+          </button>
+        </div>
+      </div>
+      
+      <div id="drafts-loading" style="text-align: center; padding: 3rem; display: none;">
+        <div class="spinner"></div>
+        <p style="margin-top: 1rem; color: var(--text-secondary);">Loading drafts from Supabase...</p>
+      </div>
+
+      <div id="drafts-list" class="drafts-grid">
+        <!-- Draft cards will be rendered here dynamically -->
+      </div>
+      
+      <div id="drafts-empty" class="empty-state" style="display: none;">
+        <div class="empty-state-title">No pending drafts</div>
+        <p class="empty-state-desc">All generated blog posts have been successfully reviewed or published.</p>
+      </div>
+    </div>
+
+    <!-- 3. DRAFT DETAIL / EDIT VIEW -->
+    <div id="detail-view" class="view-container">
+      <div class="editor-header">
+        <button type="button" class="btn btn-secondary" onclick="showListView(event)">
+          <svg width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path d="M15 19l-7-7 7-7" stroke-linecap="round" stroke-linejoin="round"/></svg>
+          Back to list
+        </button>
+        <div class="editor-header-title">
+          <h2 id="editor-title-text">Edit Draft</h2>
+          <p id="editor-subtitle-text" style="color: var(--text-muted); font-size: 0.875rem;"></p>
+        </div>
+      </div>
+
+      <div class="editor-layout">
+        
+        <!-- Left Side: Form edit panel -->
+        <div class="edit-panel">
+          <div class="edit-panel-section-title font-sans">Article Metadata</div>
+          
+          <div class="form-group">
+            <label for="edit-title">Article Title</label>
+            <input type="text" id="edit-title" class="input-field" placeholder="Enter title" oninput="updateLivePreview()">
+          </div>
+
+          <div class="form-group">
+            <label for="edit-excerpt">Excerpt / Meta Description</label>
+            <textarea id="edit-excerpt" class="input-field" placeholder="Enter meta description summary..." oninput="updateLivePreview()"></textarea>
+          </div>
+
+          <div class="form-row">
+            <div class="form-group">
+              <label for="edit-category">Category</label>
+              <input type="text" id="edit-category" class="input-field" placeholder="e.g. Careers, Technology" oninput="updateLivePreview()">
+            </div>
+            
+            <div class="form-group">
+              <label for="edit-post-date">Display date</label>
+              <input type="text" id="edit-post-date" class="input-field" placeholder="e.g. Apr 28, 2026" oninput="updateLivePreview()">
+            </div>
+          </div>
+
+          <div class="form-row">
+            <div class="form-group">
+              <label for="edit-author">Author Name</label>
+              <input type="text" id="edit-author" class="input-field" placeholder="e.g. Sipho Nkosi" oninput="updateLivePreview()">
+            </div>
+            
+            <div class="form-group">
+              <label for="edit-author-role">Author Role</label>
+              <input type="text" id="edit-author-role" class="input-field" placeholder="e.g. Head of Data Science" oninput="updateLivePreview()">
+            </div>
+          </div>
+
+          <div class="form-group">
+            <label for="edit-tint">Card colour (Card Tint)</label>
+            <select id="edit-tint" class="select-field" onchange="updateLivePreview()">
+              <option value="var(--tint-sky)">Sky Blue (Sky)</option>
+              <option value="var(--tint-peach)">Peach Orange (Peach)</option>
+              <option value="var(--tint-mint)">Mint Green (Mint)</option>
+              <option value="var(--tint-lilac)">Lilac Purple (Lilac)</option>
+            </select>
+          </div>
+
+          <div class="edit-panel-section-title" style="margin-top: 2rem;">Featured Image</div>
+          <div class="form-group">
+            <div class="image-upload-area">
+              <input type="file" id="edit-image-file" accept="image/*" onchange="handleImageUpload(event)">
+              <div class="image-upload-placeholder" id="upload-placeholder">
+                <svg fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path d="M4 16l4.586-4.586a2 2 0 012.828 0L16 16m-2-2l1.586-1.586a2 2 0 012.828 0L20 14m-6-6h.01M6 20h12a2 2 0 002-2V6a2 2 0 00-2-2H6a2 2 0 00-2 2v12a2 2 0 002 2z" stroke-linecap="round" stroke-linejoin="round"/></svg>
+                <div class="image-upload-label">Upload Featured Image</div>
+                <div class="image-upload-subtext">Click or drag and drop PNG, JPG, or WEBP</div>
+              </div>
+              <div id="image-upload-progress" style="display: none; color: var(--text-secondary); font-size: 0.875rem; margin-top: 0.5rem;">
+                <div class="spinner" style="margin-right: 0.5rem;"></div> Uploading to Supabase Storage...
+              </div>
+            </div>
+            
+            <div class="image-preview-container" id="image-preview-container">
+              <img id="image-preview-img" src="" alt="Feature preview">
+            </div>
+          </div>
+
+          <!-- Bottom form actions -->
+          <div class="editor-footer">
+            <button type="button" id="save-btn" class="btn btn-primary" onclick="saveDraftChanges(event)">
+              Save changes
+            </button>
+            <button type="button" id="publish-btn" class="btn btn-secondary" onclick="publishDraft(event)">
+              Publish
+            </button>
+          </div>
+        </div>
+
+        <!-- Right Side: Live Article Preview -->
+        <div class="preview-panel">
+          <div class="preview-panel-header">
+            Live Preview <span>Canvas</span>
+          </div>
+          <div class="preview-container" id="article-preview-container">
+            <div class="preview-art-header">
+              <div class="preview-art-meta">
+                <span id="preview-meta-category" class="preview-art-category">Category</span>
+                <span>•</span>
+                <span id="preview-meta-date">Date</span>
+              </div>
+              <h1 id="preview-art-title-text" class="preview-art-title">Article Title</h1>
+              <div class="preview-art-author-info">
+                By <strong id="preview-author-name">Author</strong>, <span id="preview-author-role">Role</span>
+              </div>
+            </div>
+            
+            <img id="preview-featured-image-img" class="preview-art-featured-image" src="" alt="Featured image">
+            
+            <div id="preview-art-body-container" class="preview-art-body">
+              <!-- Rendered blocks go here -->
+            </div>
+          </div>
+        </div>
+
+      </div>
+    </div>
+
+  </main>
+
+  <script>
+    // ----------------------------------------------------
+    // Supabase Configuration & Client Initialization
+    // ----------------------------------------------------
+    const SUPABASE_URL = "https://pknwpdtauqrfcfiyfldi.supabase.co";
+    const SUPABASE_ANON_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InBrbndwZHRhdXFyZmNmaXlmbGRpIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODM2MTkyNTcsImV4cCI6MjA5OTE5NTI1N30.X36FCeLOpYrvsgUAFaf83-8mX8_Fmf_XAsETCB167S4";
+
+    let supabaseClient = null;
+    let currentSession = null;
+    let currentDraftId = null;
+    let currentDraftBodyBlocks = [];
+    let currentUploadedImageUrl = '';
+
+    // Initialize Supabase
+    try {
+      if (SUPABASE_ANON_KEY !== "<<PASTE_ANON_KEY_PLACEHOLDER>>") {
+        supabaseClient = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
+      } else {
+        showStatus('Configuration required: Please paste your real Supabase ANON key into the SUPABASE_ANON_KEY constant in public/dashboard.html.', 'error', 0);
+      }
+    } catch (err) {
+      showStatus('Failed to initialize Supabase client: ' + err.message, 'error', 0);
+    }
+
+    // On Load Lifecycle
+    window.addEventListener('DOMContentLoaded', async () => {
+      if (!supabaseClient) return;
+
+      try {
+        const { data: { session }, error } = await supabaseClient.auth.getSession();
+        if (error) throw error;
+        
+        if (session) {
+          handleAuthSuccess(session);
+        } else {
+          showView('login-view');
+        }
+      } catch (err) {
+        showStatus('Session retrieval failed: ' + err.message, 'error');
+        showView('login-view');
+      }
+
+      // Listen for auth changes
+      supabaseClient.auth.onAuthStateChange((event, session) => {
+        if (session) {
+          handleAuthSuccess(session);
+        } else {
+          handleAuthLoggedOut();
+        }
+      });
+    });
+
+    // Sign out logic
+    document.getElementById('logout-btn').addEventListener('click', async (e) => {
+      if (e) e.preventDefault();
+      try {
+        const { error } = await supabaseClient.auth.signOut();
+        if (error) throw error;
+      } catch (err) {
+        showStatus('Signout failed: ' + err.message, 'error');
+      }
+    });
+
+    // ----------------------------------------------------
+    // View Management
+    // ----------------------------------------------------
+    function showView(viewId) {
+      document.querySelectorAll('.view-container').forEach(el => {
+        el.classList.remove('active');
+      });
+      document.getElementById(viewId).classList.add('active');
+
+      // Header links display context
+      const isLogin = (viewId === 'login-view');
+      document.getElementById('logout-btn').style.display = isLogin ? 'none' : 'flex';
+      document.getElementById('user-display-email').style.display = isLogin ? 'none' : 'block';
+    }
+
+    function handleAuthSuccess(session) {
+      currentSession = session;
+      document.getElementById('user-display-email').textContent = session.user.email;
+      showView('list-view');
+      loadDrafts();
+    }
+
+    function handleAuthLoggedOut() {
+      currentSession = null;
+      document.getElementById('user-display-email').textContent = '';
+      showView('login-view');
+    }
+
+    // ----------------------------------------------------
+    // Status Banner / Feedback Messages
+    // ----------------------------------------------------
+    function showStatus(message, type = 'success', duration = 5000) {
+      const banner = document.getElementById('status-banner');
+      const text = document.getElementById('status-banner-text');
+      
+      banner.className = 'status-banner ' + type;
+      text.textContent = message;
+      
+      if (duration > 0) {
+        setTimeout(() => {
+          if (banner.className.includes(type) && text.textContent === message) {
+            banner.style.display = 'none';
+          }
+        }, duration);
+      }
+    }
+
+    // ----------------------------------------------------
+    // Auth - Sign In
+    // ----------------------------------------------------
+    async function handleLogin(e) {
+      e.preventDefault();
+      if (!supabaseClient) return;
+
+      const email = document.getElementById('login-email').value.trim();
+      const password = document.getElementById('login-password').value;
+      const submitBtn = document.getElementById('login-submit-btn');
+
+      try {
+        submitBtn.disabled = true;
+        submitBtn.innerHTML = '<div class="spinner"></div> Logging in...';
+
+        const { data, error } = await supabaseClient.auth.signInWithPassword({
+          email,
+          password
+        });
+
+        if (error) throw error;
+        
+        // signInWithPassword automatically triggers onAuthStateChange, handling view redirect
+        showStatus('Logged in successfully', 'success');
+      } catch (err) {
+        showStatus('Authentication failed: ' + err.message, 'error');
+      } finally {
+        submitBtn.disabled = false;
+        submitBtn.innerHTML = 'Log in';
+      }
+    }
+
+    // ----------------------------------------------------
+    // List View Operations
+    // ----------------------------------------------------
+    async function loadDrafts(e) {
+      if (e) e.preventDefault();
+      if (!supabaseClient) return;
+
+      const grid = document.getElementById('drafts-list');
+      const loader = document.getElementById('drafts-loading');
+      const emptyState = document.getElementById('drafts-empty');
+
+      grid.innerHTML = '';
+      emptyState.style.display = 'none';
+      loader.style.display = 'block';
+
+      try {
+        const { data, error } = await supabaseClient
+          .from('posts')
+          .select('id, title, excerpt, created_at, status, tint')
+          .eq('status', 'draft')
+          .order('created_at', { ascending: false });
+
+        if (error) throw error;
+
+        if (!data || data.length === 0) {
+          emptyState.style.display = 'block';
+          return;
+        }
+
+        data.forEach(post => {
+          // Format Date
+          const dateStr = new Date(post.created_at).toLocaleDateString('en-ZA', {
+            year: 'numeric',
+            month: 'short',
+            day: 'numeric'
+          });
+
+          // Determine card tint indicator
+          const rawTint = post.tint || 'var(--tint-sky)';
+          let tintClass = 'tint-sky-preview';
+          if (rawTint.includes('peach')) tintClass = 'tint-peach-preview';
+          else if (rawTint.includes('mint')) tintClass = 'tint-mint-preview';
+          else if (rawTint.includes('lilac')) tintClass = 'tint-lilac-preview';
+
+          const card = document.createElement('div');
+          card.className = 'draft-card';
+          card.innerHTML = `
+            <div class="card-preview-bar ${tintClass}"></div>
+            <div class="draft-card-header">
+              <span class="draft-card-date">${dateStr}</span>
+            </div>
+            <h3 class="draft-card-title">${escapeHTML(post.title || 'Untitled Post')}</h3>
+            <p class="draft-card-excerpt">${escapeHTML(post.excerpt || 'No excerpt summary provided.')}</p>
+            <div class="draft-card-actions">
+              <button type="button" class="btn btn-secondary btn-sm" onclick="openDraft(event, '${post.id}')">
+                Open / Review
+              </button>
+            </div>
+          `;
+          grid.appendChild(card);
+        });
+
+      } catch (err) {
+        showStatus('Failed to load drafts: ' + err.message, 'error');
+      } finally {
+        loader.style.display = 'none';
+      }
+    }
+
+    // ----------------------------------------------------
+    // Detail / Edit View Operations
+    // ----------------------------------------------------
+    async function openDraft(e, draftId) {
+      if (e) e.preventDefault();
+      if (!supabaseClient) return;
+
+      currentDraftId = draftId;
+      showStatus('Loading draft details...', 'success', 2000);
+
+      try {
+        const { data, error } = await supabaseClient
+          .from('posts')
+          .select('*')
+          .eq('id', draftId)
+          .single();
+
+        if (error) throw error;
+
+        // Set state properties
+        currentDraftBodyBlocks = data.body || [];
+        currentUploadedImageUrl = data.image || '';
+
+        // Fill form fields
+        document.getElementById('edit-title').value = data.title || '';
+        document.getElementById('edit-excerpt').value = data.excerpt || '';
+        document.getElementById('edit-category').value = data.category || '';
+        document.getElementById('edit-post-date').value = data.post_date || '';
+        document.getElementById('edit-author').value = data.author || '';
+        document.getElementById('edit-author-role').value = data.author_role || '';
+        
+        // Select correct tint
+        const tintSelect = document.getElementById('edit-tint');
+        if (data.tint) {
+          tintSelect.value = data.tint;
+        } else {
+          tintSelect.value = 'var(--tint-sky)';
+        }
+
+        // Subtitle tracking
+        document.getElementById('editor-title-text').textContent = 'Review Draft';
+        document.getElementById('editor-subtitle-text').textContent = `Draft ID: ${data.id} | Slug: ${data.slug}`;
+
+        // Preview images
+        const prevContainer = document.getElementById('image-preview-container');
+        const prevImg = document.getElementById('image-preview-img');
+        const uPlaceholder = document.getElementById('upload-placeholder');
+        
+        if (currentUploadedImageUrl) {
+          prevImg.src = currentUploadedImageUrl;
+          prevContainer.style.display = 'block';
+          uPlaceholder.style.display = 'none';
+        } else {
+          prevContainer.style.display = 'none';
+          uPlaceholder.style.display = 'flex';
+          prevImg.src = '';
+        }
+
+        // Trigger Live Preview Update
+        updateLivePreview();
+        showView('detail-view');
+
+      } catch (err) {
+        showStatus('Failed to load draft detail: ' + err.message, 'error');
+      }
+    }
+
+    function showListView(e) {
+      if (e) e.preventDefault();
+      currentDraftId = null;
+      currentDraftBodyBlocks = [];
+      currentUploadedImageUrl = '';
+      showView('list-view');
+      loadDrafts();
+    }
+
+    // ----------------------------------------------------
+    // Live Article Rendering / Preview Canvas Updates
+    // ----------------------------------------------------
+    function updateLivePreview() {
+      // Fetch current input values
+      const title = document.getElementById('edit-title').value;
+      const excerpt = document.getElementById('edit-excerpt').value;
+      const category = document.getElementById('edit-category').value;
+      const postDate = document.getElementById('edit-post-date').value;
+      const author = document.getElementById('edit-author').value;
+      const authorRole = document.getElementById('edit-author-role').value;
+      
+      // Update article header preview values
+      document.getElementById('preview-art-title-text').textContent = title || 'Untitled Post';
+      document.getElementById('preview-meta-category').textContent = category || 'Uncategorised';
+      document.getElementById('preview-meta-date').textContent = postDate || 'Publishing Date';
+      document.getElementById('preview-author-name').textContent = author || 'Anonymous';
+      document.getElementById('preview-author-role').textContent = authorRole || 'Writer';
+
+      // Update Featured image display in canvas
+      const featuredImg = document.getElementById('preview-featured-image-img');
+      if (currentUploadedImageUrl) {
+        featuredImg.src = currentUploadedImageUrl;
+        featuredImg.style.display = 'block';
+      } else {
+        featuredImg.style.display = 'none';
+        featuredImg.src = '';
+      }
+
+      // Render body blocks
+      const bodyContainer = document.getElementById('preview-art-body-container');
+      bodyContainer.innerHTML = '';
+
+      if (!currentDraftBodyBlocks || currentDraftBodyBlocks.length === 0) {
+        bodyContainer.innerHTML = '<p style="color: #9ca3af; font-style: italic;">No article body content generated.</p>';
+        return;
+      }
+
+      currentDraftBodyBlocks.forEach(block => {
+        let blockEl = null;
+
+        switch (block.type) {
+          case 'h2':
+            blockEl = document.createElement('h2');
+            blockEl.textContent = block.text;
+            break;
+          case 'h3':
+            blockEl = document.createElement('h3');
+            blockEl.textContent = block.text;
+            break;
+          case 'p':
+            blockEl = document.createElement('p');
+            blockEl.textContent = block.text;
+            break;
+          case 'quote':
+            blockEl = document.createElement('blockquote');
+            const quoteP = document.createElement('p');
+            quoteP.textContent = block.text;
+            blockEl.appendChild(quoteP);
+            
+            if (block.who) {
+              const cite = document.createElement('cite');
+              cite.textContent = `— ${block.who}`;
+              blockEl.appendChild(cite);
+            }
+            break;
+          case 'ul':
+            blockEl = document.createElement('ul');
+            if (block.items) {
+              block.items.forEach(item => {
+                const li = document.createElement('li');
+                li.textContent = item;
+                blockEl.appendChild(li);
+              });
+            }
+            break;
+          case 'ol':
+            blockEl = document.createElement('ol');
+            if (block.items) {
+              block.items.forEach(item => {
+                const li = document.createElement('li');
+                li.textContent = item;
+                blockEl.appendChild(li);
+              });
+            }
+            break;
+        }
+
+        if (blockEl) {
+          bodyContainer.appendChild(blockEl);
+        }
+      });
+    }
+
+    // ----------------------------------------------------
+    // File Storage Upload
+    // ----------------------------------------------------
+    async function handleImageUpload(e) {
+      if (e) e.preventDefault();
+      if (!supabaseClient || !currentDraftId) return;
+
+      const file = e.target.files[0];
+      if (!file) return;
+
+      const uploaderArea = document.getElementById('upload-placeholder');
+      const uploaderProgress = document.getElementById('image-upload-progress');
+      const previewContainer = document.getElementById('image-preview-container');
+      const previewImg = document.getElementById('image-preview-img');
+
+      try {
+        uploaderArea.style.display = 'none';
+        uploaderProgress.style.display = 'block';
+
+        // Prepare file name: sanitise spaces to hyphens
+        const sanitisedName = file.name.replace(/\s+/g, '-');
+        const fileName = `${currentDraftId}-${Date.now()}-${sanitisedName}`;
+
+        console.log(`[Storage Upload] Uploading ${fileName} to bucket 'blog-images'...`);
+        const { data, error } = await supabaseClient.storage
+          .from('blog-images')
+          .upload(fileName, file);
+
+        if (error) throw error;
+
+        // Fetch Public URL
+        const { data: urlData } = supabaseClient.storage
+          .from('blog-images')
+          .getPublicUrl(fileName);
+
+        if (!urlData || !urlData.publicUrl) {
+          throw new Error('Failed to retrieve uploaded image public URL.');
+        }
+
+        currentUploadedImageUrl = urlData.publicUrl;
+        console.log(`[Storage Upload] Success. URL: ${currentUploadedImageUrl}`);
+
+        // Update previews
+        previewImg.src = currentUploadedImageUrl;
+        previewContainer.style.display = 'block';
+        
+        updateLivePreview();
+        showStatus('Image uploaded successfully', 'success');
+
+      } catch (err) {
+        showStatus('Image upload failed: ' + err.message, 'error');
+        uploaderArea.style.display = 'flex';
+      } finally {
+        uploaderProgress.style.display = 'none';
+      }
+    }
+
+    // ----------------------------------------------------
+    // Database Save Operations
+    // ----------------------------------------------------
+    async function saveDraftChanges(e) {
+      if (e) e.preventDefault();
+      if (!supabaseClient || !currentDraftId) return;
+
+      const saveBtn = document.getElementById('save-btn');
+      
+      const title = document.getElementById('edit-title').value.trim();
+      const excerpt = document.getElementById('edit-excerpt').value.trim();
+      const category = document.getElementById('edit-category').value.trim();
+      const postDate = document.getElementById('edit-post-date').value.trim();
+      const author = document.getElementById('edit-author').value.trim();
+      const authorRole = document.getElementById('edit-author-role').value.trim();
+      const tint = document.getElementById('edit-tint').value;
+
+      try {
+        saveBtn.disabled = true;
+        saveBtn.innerHTML = '<div class="spinner"></div> Saving...';
+
+        const updateData = {
+          title,
+          excerpt,
+          category,
+          post_date: postDate,
+          author,
+          author_role: authorRole,
+          tint,
+          image: currentUploadedImageUrl
+        };
+
+        const { data, error } = await supabaseClient
+          .from('posts')
+          .update(updateData)
+          .eq('id', currentDraftId);
+
+        if (error) throw error;
+
+        showStatus('Changes saved successfully', 'success');
+
+      } catch (err) {
+        showStatus('Failed to save changes: ' + err.message, 'error');
+      } finally {
+        saveBtn.disabled = false;
+        saveBtn.innerHTML = 'Save changes';
+      }
+    }
+
+    async function publishDraft(e) {
+      if (e) e.preventDefault();
+      if (!supabaseClient || !currentDraftId) return;
+
+      // Read the SAME eight fields saveDraftChanges writes, fresh from the form,
+      // so hitting Publish atomically saves any unsaved edits AND goes live.
+      const title = document.getElementById('edit-title').value.trim();
+      const excerpt = document.getElementById('edit-excerpt').value.trim();
+      const category = document.getElementById('edit-category').value.trim();
+      const postDate = document.getElementById('edit-post-date').value.trim();
+      const author = document.getElementById('edit-author').value.trim();
+      const authorRole = document.getElementById('edit-author-role').value.trim();
+      const tint = document.getElementById('edit-tint').value;
+
+      // Validate required fields before doing anything else.
+      const missing = [];
+      if (!title) missing.push('Title');
+      if (!excerpt) missing.push('Excerpt');
+      if (!category) missing.push('Category');
+      if (!postDate) missing.push('Display date');
+      if (!author) missing.push('Author name');
+      if (!authorRole) missing.push('Author role');
+
+      if (missing.length > 0) {
+        showStatus('Cannot publish — please fill in: ' + missing.join(', ') + '.', 'error');
+        return;
+      }
+
+      // A published post with no feature image renders a plain colour block on
+      // the website blog card, so make that explicit before going live.
+      if (!currentUploadedImageUrl) {
+        if (!confirm("No feature image uploaded — the post card will show a plain colour block instead. Publish anyway?")) {
+          return;
+        }
+      }
+
+      if (!confirm("Publish this post live to the website blog?")) {
+        return;
+      }
+
+      const publishBtn = document.getElementById('publish-btn');
+
+      try {
+        publishBtn.disabled = true;
+        publishBtn.innerHTML = '<div class="spinner"></div> Publishing...';
+
+        // Single atomic update: save the eight editable fields AND flip the
+        // post live. The logged-in session's "authed full access" RLS policy
+        // permits this; the website reads published posts straight from Supabase.
+        const { error } = await supabaseClient
+          .from('posts')
+          .update({
+            title,
+            excerpt,
+            category,
+            post_date: postDate,
+            author,
+            author_role: authorRole,
+            tint,
+            image: currentUploadedImageUrl,
+            status: 'published',
+            published_at: new Date().toISOString()
+          })
+          .eq('id', currentDraftId);
+
+        if (error) throw error;
+
+        showStatus('Post published — it is now live on the website blog.', 'success');
+
+        // Return to draft list after a brief delay
+        setTimeout(() => {
+          showListView(e);
+        }, 2000);
+
+      } catch (err) {
+        showStatus('Publishing failed: ' + err.message, 'error');
+      } finally {
+        publishBtn.disabled = false;
+        publishBtn.innerHTML = 'Publish';
+      }
+    }
+
+    // ----------------------------------------------------
+    // Drag & Drop event prevention
+    // ----------------------------------------------------
+    // Prevent default drag and drop actions globally to stop browser from navigating to dropped images
+    document.addEventListener('dragover', (e) => e.preventDefault());
+    document.addEventListener('drop', (e) => e.preventDefault());
+
+    // ----------------------------------------------------
+    // Utilities
+    // ----------------------------------------------------
+    function escapeHTML(str) {
+      if (!str) return '';
+      return str.replace(/[&<>'"]/g, 
+        tag => ({
+          '&': '&amp;',
+          '<': '&lt;',
+          '>': '&gt;',
+          "'": '&#39;',
+          '"': '&quot;'
+        }[tag] || tag)
+      );
+    }
+  </script>
+</body>
+</html>

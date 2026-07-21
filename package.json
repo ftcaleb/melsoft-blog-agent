@@ -4,6 +4,9 @@
   "type": "module",
   "description": "Automated blogging agent that uses the Anthropic API to research topics, write posts, and log results.",
   "main": "server.js",
+  "engines": {
+    "node": ">=18"
+  },
   "scripts": {
     "start": "node server.js"
   },
