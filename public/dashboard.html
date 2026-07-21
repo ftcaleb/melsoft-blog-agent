@@ -1694,7 +1694,8 @@
             ? `${viewLive}
                <button type="button" class="btn btn-secondary btn-sm" onclick="openDraft(event, '${post.id}')">Open</button>
                <button type="button" class="btn btn-danger btn-sm" onclick="deletePost(event, '${post.id}')">Delete</button>`
-            : `<button type="button" class="btn btn-secondary btn-sm" onclick="openDraft(event, '${post.id}')">Open / Review</button>`;
+            : `<button type="button" class="btn btn-secondary btn-sm" onclick="openDraft(event, '${post.id}')">Open / Review</button>
+               <button type="button" class="btn btn-danger btn-sm" onclick="deletePost(event, '${post.id}')">Delete</button>`;
 
           const card = document.createElement('div');
           card.className = 'draft-card';
@@ -1719,18 +1720,24 @@
       }
     }
 
-    // Permanently delete a published post from Supabase (with confirm).
+    // Permanently delete a post (draft or published) from Supabase, with a
+    // context-aware confirm. Published deletes also remove the live blog post;
+    // draft deletes just discard the unpublished draft.
     async function deletePost(e, id) {
       if (e) e.preventDefault();
       if (!supabaseClient) return;
-      if (!confirm('Delete this published post permanently? It will be removed from the website blog and this cannot be undone.')) return;
+      const isPublished = currentTab === 'published';
+      const confirmMsg = isPublished
+        ? 'Delete this published post permanently? It will be removed from the website blog and this cannot be undone.'
+        : 'Delete this draft permanently? This cannot be undone.';
+      if (!confirm(confirmMsg)) return;
       try {
         const { error } = await supabaseClient.from('posts').delete().eq('id', id);
         if (error) throw error;
-        showStatus('Post deleted.', 'success');
+        showStatus(isPublished ? 'Post deleted.' : 'Draft deleted.', 'success');
         loadList();
       } catch (err) {
-        showStatus('Failed to delete post: ' + err.message, 'error');
+        showStatus('Failed to delete ' + (isPublished ? 'post' : 'draft') + ': ' + err.message, 'error');
       }
     }
 
