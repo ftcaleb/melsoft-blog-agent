@@ -1198,6 +1198,24 @@
       .topnav-logo { height: 32px; }
       .topnav-email { display: none !important; }
     }
+
+    /* Drafts / Published tab switcher */
+    .list-tabs {
+      display: inline-flex; gap: 0.25rem;
+      background: rgba(255, 255, 255, 0.04);
+      border: 1px solid rgba(255, 255, 255, 0.08);
+      border-radius: var(--rad-pill); padding: 0.25rem;
+    }
+    .list-tab {
+      background: transparent; border: none; color: rgba(255, 255, 255, 0.6);
+      padding: 0.5rem 1.25rem; border-radius: var(--rad-pill);
+      font-family: var(--font-body); font-size: 0.9rem; font-weight: 600; cursor: pointer;
+      transition: background-color 0.18s ease, color 0.18s ease;
+    }
+    .list-tab:hover { color: #fff; }
+    .list-tab.active { background: rgba(114, 0, 117, 0.35); color: #fff; }
+    /* Room between the two actions (Open + Delete) on published cards. */
+    .draft-card-actions { gap: 0.5rem; }
   </style>
 </head>
 <body>
@@ -1250,9 +1268,12 @@
     <!-- 2. DRAFT LIST VIEW -->
     <div id="list-view" class="view-container">
       <div class="list-header">
-        <h2>Pending Drafts</h2>
+        <div class="list-tabs">
+          <button type="button" id="tab-draft" class="list-tab active" onclick="switchTab(event, 'draft')">Drafts</button>
+          <button type="button" id="tab-published" class="list-tab" onclick="switchTab(event, 'published')">Published</button>
+        </div>
         <div style="display: flex; gap: 0.75rem;">
-          <button type="button" id="refresh-btn" class="btn btn-secondary" onclick="loadDrafts(event)">
+          <button type="button" id="refresh-btn" class="btn btn-secondary" onclick="loadList(event)">
             <svg width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path d="M4 4v5h.582m15.356 2A8.001 8.001 0 1121.21 8H18" stroke-linecap="round" stroke-linejoin="round"/></svg>
             Refresh
           </button>
@@ -1410,6 +1431,7 @@
     let currentDraftId = null;
     let currentDraftBodyBlocks = [];
     let currentUploadedImageUrl = '';
+    let currentTab = 'draft'; // 'draft' | 'published' — which list tab is active
 
     // Initialize Supabase
     try {
@@ -1480,7 +1502,7 @@
       currentSession = session;
       document.getElementById('user-display-email').textContent = session.user.email;
       showView('list-view');
-      loadDrafts();
+      switchTab(null, 'draft');
     }
 
     function handleAuthLoggedOut() {
@@ -1543,46 +1565,66 @@
     // ----------------------------------------------------
     // List View Operations
     // ----------------------------------------------------
-    async function loadDrafts(e) {
+    // Switch between the Drafts and Published tabs.
+    function switchTab(e, tab) {
       if (e) e.preventDefault();
+      currentTab = tab;
+      document.getElementById('tab-draft').classList.toggle('active', tab === 'draft');
+      document.getElementById('tab-published').classList.toggle('active', tab === 'published');
+      loadList();
+    }
+
+    // Loads the posts for the active tab (draft or published) into the grid.
+    async function loadList(e) {
+      if (e && e.preventDefault) e.preventDefault();
       if (!supabaseClient) return;
 
+      const status = currentTab;
+      const isPublished = status === 'published';
       const grid = document.getElementById('drafts-list');
       const loader = document.getElementById('drafts-loading');
       const emptyState = document.getElementById('drafts-empty');
 
       grid.innerHTML = '';
       emptyState.style.display = 'none';
+      const loaderText = loader.querySelector('p');
+      if (loaderText) loaderText.textContent = isPublished ? 'Loading published posts from Supabase...' : 'Loading drafts from Supabase...';
       loader.style.display = 'block';
 
       try {
         const { data, error } = await supabaseClient
           .from('posts')
-          .select('id, title, excerpt, created_at, status, tint')
-          .eq('status', 'draft')
-          .order('created_at', { ascending: false });
+          .select('id, title, excerpt, created_at, published_at, status, tint')
+          .eq('status', status)
+          .order(isPublished ? 'published_at' : 'created_at', { ascending: false });
 
         if (error) throw error;
 
         if (!data || data.length === 0) {
+          emptyState.querySelector('.empty-state-title').textContent = isPublished ? 'No published posts' : 'No pending drafts';
+          emptyState.querySelector('.empty-state-desc').textContent = isPublished
+            ? 'Posts you publish will appear here.'
+            : 'All generated blog posts have been successfully reviewed or published.';
           emptyState.style.display = 'block';
           return;
         }
 
         data.forEach(post => {
-          // Format Date
-          const dateStr = new Date(post.created_at).toLocaleDateString('en-ZA', {
-            year: 'numeric',
-            month: 'short',
-            day: 'numeric'
+          const dateSource = isPublished ? (post.published_at || post.created_at) : post.created_at;
+          const dateStr = new Date(dateSource).toLocaleDateString('en-ZA', {
+            year: 'numeric', month: 'short', day: 'numeric'
           });
 
-          // Determine card tint indicator
           const rawTint = post.tint || 'var(--tint-sky)';
           let tintClass = 'tint-sky-preview';
           if (rawTint.includes('peach')) tintClass = 'tint-peach-preview';
           else if (rawTint.includes('mint')) tintClass = 'tint-mint-preview';
           else if (rawTint.includes('lilac')) tintClass = 'tint-lilac-preview';
+
+          const actions = isPublished
+            ? `<button type="button" class="btn btn-secondary btn-sm" onclick="openDraft(event, '${post.id}')">Open</button>
+               <button type="button" class="btn btn-danger btn-sm" onclick="deletePost(event, '${post.id}')">Delete</button>`
+            : `<button type="button" class="btn btn-secondary btn-sm" onclick="openDraft(event, '${post.id}')">Open / Review</button>`;
 
           const card = document.createElement('div');
           card.className = 'draft-card';
@@ -1594,18 +1636,31 @@
             <h3 class="draft-card-title">${escapeHTML(post.title || 'Untitled Post')}</h3>
             <p class="draft-card-excerpt">${escapeHTML(post.excerpt || 'No excerpt summary provided.')}</p>
             <div class="draft-card-actions">
-              <button type="button" class="btn btn-secondary btn-sm" onclick="openDraft(event, '${post.id}')">
-                Open / Review
-              </button>
+              ${actions}
             </div>
           `;
           grid.appendChild(card);
         });
 
       } catch (err) {
-        showStatus('Failed to load drafts: ' + err.message, 'error');
+        showStatus('Failed to load ' + (isPublished ? 'published posts' : 'drafts') + ': ' + err.message, 'error');
       } finally {
         loader.style.display = 'none';
+      }
+    }
+
+    // Permanently delete a published post from Supabase (with confirm).
+    async function deletePost(e, id) {
+      if (e) e.preventDefault();
+      if (!supabaseClient) return;
+      if (!confirm('Delete this published post permanently? It will be removed from the website blog and this cannot be undone.')) return;
+      try {
+        const { error } = await supabaseClient.from('posts').delete().eq('id', id);
+        if (error) throw error;
+        showStatus('Post deleted.', 'success');
+        loadList();
+      } catch (err) {
+        showStatus('Failed to delete post: ' + err.message, 'error');
       }
     }
 
@@ -1682,7 +1737,7 @@
       currentDraftBodyBlocks = [];
       currentUploadedImageUrl = '';
       showView('list-view');
-      loadDrafts();
+      loadList();
     }
 
     // ----------------------------------------------------
