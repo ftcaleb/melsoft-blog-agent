@@ -838,10 +838,61 @@
       transition: background-color 0.18s ease, border-color 0.18s ease;
     }
     .nav-link:hover { background: rgba(114, 0, 117, 0.3); border-color: #720075; }
+
+    /* ===== Shared top navbar (identical design on Home + Dashboard) ===== */
+    .topnav {
+      position: sticky; top: 0; z-index: 100;
+      align-self: stretch;
+      /* break out of body's 3.5rem/1.5rem padding → flush, full-width bar */
+      margin: -3.5rem -1.5rem 2.25rem;
+      display: flex; align-items: center; gap: 1rem;
+      padding: 0.8rem clamp(1rem, 4vw, 2rem);
+      background: linear-gradient(180deg, rgba(10, 23, 51, 0.92) 0%, rgba(6, 14, 34, 0.94) 100%);
+      border-bottom: 1px solid rgba(114, 0, 117, 0.28);
+      -webkit-backdrop-filter: blur(12px); backdrop-filter: blur(12px);
+    }
+    .topnav-brand { display: inline-flex; align-items: center; margin-right: 0.4rem; }
+    .topnav-logo { height: 36px; width: auto; display: block; }
+    .topnav-links { display: flex; gap: 0.35rem; }
+    .topnav-link {
+      color: rgba(255, 255, 255, 0.7); text-decoration: none;
+      padding: 0.5rem 1.05rem; border-radius: var(--rad-pill);
+      font-size: 0.88rem; font-weight: 600; white-space: nowrap;
+      transition: background-color 0.18s ease, color 0.18s ease;
+    }
+    .topnav-link:hover { color: #fff; background: rgba(255, 255, 255, 0.07); }
+    .topnav-link.is-active { color: #fff; background: rgba(114, 0, 117, 0.3); }
+    .topnav-spacer { flex: 1; }
+    .topnav-actions { display: flex; align-items: center; gap: 0.6rem; }
+    .topnav-btn {
+      background: transparent; border: 1px solid rgba(255, 255, 255, 0.18);
+      color: rgba(255, 255, 255, 0.82); padding: 0.5rem 1.05rem;
+      border-radius: var(--rad-pill); font-size: 0.85rem; font-weight: 600;
+      cursor: pointer; font-family: var(--font-body); text-decoration: none; white-space: nowrap;
+      transition: background-color 0.18s ease, border-color 0.18s ease, color 0.18s ease;
+    }
+    .topnav-btn:hover { border-color: rgba(114, 0, 117, 0.6); color: #fff; background: rgba(114, 0, 117, 0.14); }
+    @media (max-width: 768px) {
+      .topnav { margin: -2.5rem -1rem 1.75rem; flex-wrap: wrap; gap: 0.5rem; }
+      .topnav-logo { height: 32px; }
+    }
   </style>
   <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
 </head>
 <body>
+  <nav class="topnav">
+    <a href="/" class="topnav-brand"><img src="assets/logo-dark.png" alt="Melsoft" class="topnav-logo"></a>
+    <div class="topnav-links">
+      <a href="/" class="topnav-link is-active">Home</a>
+      <a href="/dashboard.html" class="topnav-link">Dashboard</a>
+    </div>
+    <div class="topnav-spacer"></div>
+    <div class="topnav-actions" id="navActions" style="display:none;">
+      <button id="regenBtn" onclick="regenerateTopics()" class="topnav-btn">↻ Regenerate</button>
+      <button id="logoutBtn" onclick="handleLogout()" class="topnav-btn">Log out</button>
+    </div>
+  </nav>
+
   <div class="glow-circle"></div>
   
   <div class="container">
@@ -866,11 +917,6 @@
     </div>
 
     <header id="mainHeader" style="display:none;">
-      <div style="display:flex; justify-content:flex-end; gap:0.75rem; margin-bottom:1rem;">
-        <button id="regenBtn" onclick="regenerateTopics()" class="nav-link">↻ Regenerate</button>
-        <a href="/dashboard.html" class="nav-link">Dashboard</a>
-        <button id="logoutBtn" onclick="handleLogout()" class="logout-link">Log out</button>
-      </div>
       <h1>Melsoft Blog Agent</h1>
       <p>Automated research and selection. Review the curated candidate articles and select one to generate a high-impact blog post.</p>
     </header>
@@ -933,12 +979,14 @@
       document.getElementById('loginView').style.display = 'block';
       document.getElementById('mainHeader').style.display = 'none';
       document.getElementById('appContainer').style.display = 'none';
+      document.getElementById('navActions').style.display = 'none';
     }
 
     function showApp() {
       document.getElementById('loginView').style.display = 'none';
       document.getElementById('mainHeader').style.display = '';
       document.getElementById('appContainer').style.display = '';
+      document.getElementById('navActions').style.display = 'flex';
     }
 
     async function handleLogin(e) {
