@@ -1,6 +1,5 @@
 import express from 'express';
 import dotenv from 'dotenv';
-import crypto from 'crypto';
 import path from 'path';
 import { fileURLToPath } from 'url';
 import { generateCandidates } from './src/research.js';
@@ -21,53 +20,38 @@ const PORT = process.env.PORT || 3000;
 // Enable JSON parsing middleware
 app.use(express.json());
 
-// ---------------------------------------------------------------------------
-// Optional HTTP Basic Auth gate.
-// Enabled only when BASIC_AUTH_USER and BASIC_AUTH_PASS are both set, so local
-// dev without them is unaffected. It sits before the static handler and the
-// routes, so it protects BOTH the admin pages and the billed /api/* endpoints
-// (research + post generation) — preventing anyone with the public URL from
-// draining the Anthropic key. No front-end change is needed: after the initial
-// prompt the browser auto-sends credentials on same-origin fetches.
-// ---------------------------------------------------------------------------
-const BASIC_AUTH_USER = process.env.BASIC_AUTH_USER;
-const BASIC_AUTH_PASS = process.env.BASIC_AUTH_PASS;
+// Serve static files from the public folder. These are HTML/CSS/JS shells with
+// no secrets; access control is enforced on the billed API below (and by each
+// page's own Supabase login), so the static assets themselves are open.
+app.use(express.static(path.join(__dirname, 'public')));
 
-function safeEqual(a, b) {
-  const ab = Buffer.from(String(a));
-  const bb = Buffer.from(String(b));
-  // Length check first avoids timingSafeEqual throwing on unequal lengths.
-  if (ab.length !== bb.length) return false;
-  return crypto.timingSafeEqual(ab, bb);
-}
-
-if (BASIC_AUTH_USER && BASIC_AUTH_PASS) {
-  app.use((req, res, next) => {
+// ---------------------------------------------------------------------------
+// Supabase auth gate for the billed API.
+// Every /api request must carry a valid Supabase access token
+// (Authorization: Bearer <token>) from a logged-in user. This is the single
+// login flow — the same Supabase session both pages use — and it stops anyone
+// with the public URL from draining the Anthropic key.
+// ---------------------------------------------------------------------------
+async function requireAuth(req, res, next) {
+  try {
     const header = req.headers.authorization || '';
-    const [scheme, encoded] = header.split(' ');
+    const token = header.startsWith('Bearer ') ? header.slice(7).trim() : '';
+    if (!token) return res.status(401).json({ error: 'Not authenticated' });
 
-    if (scheme === 'Basic' && encoded) {
-      const decoded = Buffer.from(encoded, 'base64').toString('utf8');
-      const sep = decoded.indexOf(':');
-      const user = decoded.slice(0, sep);
-      const pass = decoded.slice(sep + 1);
-
-      // Evaluate both comparisons regardless, to keep timing uniform.
-      const userOk = safeEqual(user, BASIC_AUTH_USER);
-      const passOk = safeEqual(pass, BASIC_AUTH_PASS);
-      if (userOk && passOk) return next();
+    const { data, error } = await supabase.auth.getUser(token);
+    if (error || !data || !data.user) {
+      return res.status(401).json({ error: 'Invalid or expired session. Please sign in again.' });
     }
 
-    res.set('WWW-Authenticate', 'Basic realm="Melsoft Blog Agent", charset="UTF-8"');
-    return res.status(401).send('Authentication required.');
-  });
-  console.log('[auth] HTTP Basic Auth gate ENABLED.');
-} else {
-  console.warn('[auth] BASIC_AUTH_USER/PASS not set — pages and API are OPEN. Fine for local dev; set both before a public deploy.');
+    req.user = data.user;
+    next();
+  } catch (err) {
+    console.error('[auth] Token verification failed:', err);
+    return res.status(401).json({ error: 'Authentication check failed' });
+  }
 }
 
-// Serve static files from the public folder
-app.use(express.static(path.join(__dirname, 'public')));
+app.use('/api', requireAuth);
 
 // In-flight lock: coalesces concurrent/rapid /api/topics requests into a single
 // run so a spammed refresh button (or parallel tabs) can't trigger multiple

@@ -796,20 +796,78 @@
       -webkit-text-fill-color: transparent !important;
       color: #ffffff !important;
     }
+
+    /* Login view (Supabase single sign-in) */
+    #loginView { max-width: 420px; margin: 8vh auto 0; }
+    .login-card {
+      background: rgba(17, 17, 20, 0.6);
+      border: 1px solid rgba(114, 0, 117, 0.25);
+      border-radius: var(--radius-lg);
+      padding: 2.5rem 2.25rem;
+      box-shadow: 0 24px 60px -30px rgba(0, 0, 0, 0.7);
+      -webkit-backdrop-filter: blur(16px);
+      backdrop-filter: blur(16px);
+    }
+    .login-title { font-family: var(--font-display); font-size: 1.8rem; color: #fff; margin-bottom: 0.4rem; }
+    .login-sub { color: rgba(255, 255, 255, 0.6); font-size: 0.95rem; margin-bottom: 1.5rem; }
+    .login-field { display: flex; flex-direction: column; gap: 0.4rem; margin-bottom: 1rem; }
+    .login-field label {
+      font-size: 0.72rem; font-weight: 600; text-transform: uppercase;
+      letter-spacing: 0.08em; color: rgba(255, 255, 255, 0.55);
+    }
+    .login-field input {
+      background: rgba(0, 0, 0, 0.35); border: 1px solid rgba(114, 0, 117, 0.25);
+      color: #fff; padding: 0.8rem 1rem; border-radius: 12px;
+      font-family: var(--font-body); font-size: 0.95rem; outline: none;
+      transition: border-color 0.18s ease, box-shadow 0.18s ease;
+    }
+    .login-field input:focus { border-color: rgba(114, 0, 117, 0.7); box-shadow: 0 0 0 3px rgba(114, 0, 117, 0.14); }
+    .login-error { color: #ff6b6b; font-size: 0.85rem; margin-top: 0.75rem; min-height: 1rem; text-align: center; }
+    .logout-link {
+      background: transparent; border: 1px solid rgba(255, 255, 255, 0.18);
+      color: rgba(255, 255, 255, 0.8); padding: 0.5rem 1rem; border-radius: var(--rad-pill);
+      font-size: 0.8rem; font-weight: 600; cursor: pointer; font-family: var(--font-body);
+      transition: border-color 0.18s ease, color 0.18s ease;
+    }
+    .logout-link:hover { border-color: rgba(114, 0, 117, 0.6); color: #fff; }
   </style>
+  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
 </head>
 <body>
   <div class="glow-circle"></div>
   
   <div class="container">
-    <header>
+    <!-- Login view — the single Supabase sign-in shared with the dashboard -->
+    <div id="loginView" style="display:none;">
+      <div class="login-card">
+        <h2 class="login-title">Sign in</h2>
+        <p class="login-sub">Use your Melsoft admin login to access the blog agent.</p>
+        <form id="loginForm" onsubmit="handleLogin(event)">
+          <div class="login-field">
+            <label for="loginEmail">Email</label>
+            <input type="email" id="loginEmail" autocomplete="username" required>
+          </div>
+          <div class="login-field">
+            <label for="loginPassword">Password</label>
+            <input type="password" id="loginPassword" autocomplete="current-password" required>
+          </div>
+          <button type="submit" id="loginBtn" class="btn-select" style="width:100%; justify-content:center;">Sign in</button>
+          <div id="loginError" class="login-error"></div>
+        </form>
+      </div>
+    </div>
+
+    <header id="mainHeader" style="display:none;">
+      <div style="display:flex; justify-content:flex-end; margin-bottom:1rem;">
+        <button id="logoutBtn" onclick="handleLogout()" class="logout-link">Log out</button>
+      </div>
       <h1>Melsoft Blog Agent</h1>
       <p>Automated research and selection. Review the curated candidate articles and select one to generate a high-impact blog post.</p>
     </header>
 
     <div id="successAlert" class="success-alert"></div>
 
-    <div id="appContainer">
+    <div id="appContainer" style="display:none;">
       <!-- Loading State -->
       <div id="loadingState" class="loading-container">
         <div class="spinner"></div>
@@ -835,6 +893,70 @@
   <script>
     let activeTopics = [];
     let topicsLoading = false; // in-flight guard: prevents rapid re-clicks triggering duplicate billed runs
+
+    // -------------------------------------------------------------------------
+    // Supabase auth — the single login, shared (same origin) with the dashboard.
+    // -------------------------------------------------------------------------
+    const SUPABASE_URL = "https://pknwpdtauqrfcfiyfldi.supabase.co";
+    const SUPABASE_ANON_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InBrbndwZHRhdXFyZmNmaXlmbGRpIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODM2MTkyNTcsImV4cCI6MjA5OTE5NTI1N30.X36FCeLOpYrvsgUAFaf83-8mX8_Fmf_XAsETCB167S4";
+
+    let supabaseClient = null;
+    try {
+      supabaseClient = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
+    } catch (e) {
+      console.error('Supabase init failed:', e);
+    }
+
+    async function getAccessToken() {
+      if (!supabaseClient) return null;
+      const { data } = await supabaseClient.auth.getSession();
+      return (data && data.session && data.session.access_token) || null;
+    }
+
+    // Attach the Supabase bearer token so the billed /api routes accept the call.
+    async function authHeaders(extra = {}) {
+      const token = await getAccessToken();
+      return { ...extra, ...(token ? { Authorization: 'Bearer ' + token } : {}) };
+    }
+
+    function showLogin() {
+      document.getElementById('loginView').style.display = 'block';
+      document.getElementById('mainHeader').style.display = 'none';
+      document.getElementById('appContainer').style.display = 'none';
+    }
+
+    function showApp() {
+      document.getElementById('loginView').style.display = 'none';
+      document.getElementById('mainHeader').style.display = '';
+      document.getElementById('appContainer').style.display = '';
+    }
+
+    async function handleLogin(e) {
+      e.preventDefault();
+      if (!supabaseClient) return;
+      const email = document.getElementById('loginEmail').value.trim();
+      const password = document.getElementById('loginPassword').value;
+      const btn = document.getElementById('loginBtn');
+      const errEl = document.getElementById('loginError');
+      errEl.textContent = '';
+      btn.disabled = true;
+      btn.textContent = 'Signing in...';
+      try {
+        const { error } = await supabaseClient.auth.signInWithPassword({ email, password });
+        if (error) throw error;
+        // onAuthStateChange switches to the app view on success.
+      } catch (err) {
+        errEl.textContent = err.message || 'Sign in failed';
+      } finally {
+        btn.disabled = false;
+        btn.textContent = 'Sign in';
+      }
+    }
+
+    async function handleLogout() {
+      if (!supabaseClient) return;
+      try { await supabaseClient.auth.signOut(); } catch (e) {}
+    }
 
     async function loadTopics() {
       // Debounce/guard: ignore re-entrant calls while a load is already running
@@ -866,7 +988,8 @@
       topicsGrid.innerHTML = '';
 
       try {
-        const response = await fetch('/api/topics');
+        const response = await fetch('/api/topics', { headers: await authHeaders() });
+        if (response.status === 401) { showLogin(); return; }
         if (!response.ok) {
           throw new Error(`Server returned status ${response.status}`);
         }
@@ -953,12 +1076,11 @@
       try {
         const response = await fetch('/api/approve', {
           method: 'POST',
-          headers: {
-            'Content-Type': 'application/json'
-          },
+          headers: await authHeaders({ 'Content-Type': 'application/json' }),
           body: JSON.stringify({ topic })
         });
 
+        if (response.status === 401) { loadingState.style.display = 'none'; showLogin(); return; }
         if (!response.ok) {
           const errData = await response.json().catch(() => ({}));
           throw new Error(errData.details || 'Approval and post generation failed');
@@ -1017,8 +1139,18 @@
       }
     }
 
-    // Load topics when page loads
-    window.addEventListener('DOMContentLoaded', loadTopics);
+    // Gate the app behind the Supabase session; load topics only once signed in.
+    window.addEventListener('DOMContentLoaded', () => {
+      if (!supabaseClient) { showLogin(); return; }
+      supabaseClient.auth.onAuthStateChange((event, session) => {
+        if (session) {
+          showApp();
+          if (!activeTopics.length && !topicsLoading) loadTopics();
+        } else {
+          showLogin();
+        }
+      });
+    });
   </script>
 </body>
 </html>
