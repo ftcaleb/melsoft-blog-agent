@@ -192,7 +192,91 @@ export function markdownToBlocks(markdown, title = '') {
     }
   }
 
-  return blocks;
+  return normalizeFaqBlocks(blocks);
+}
+
+/**
+ * Normalizes a post's FAQ section into the exact structure the Melsoft website
+ * renders as a collapsible accordion:
+ *
+ *   { type: 'h2', text: 'Frequently Asked Questions' }
+ *   { type: 'h3', text: '<question>' }
+ *   { type: 'p',  text: '<answer>' }   (one or more)
+ *   ... (repeat h3 + p per question)
+ *
+ * Posts historically came out of the writer in inconsistent shapes — an `h3`
+ * (or `FAQ`/`FAQ: …`) heading with `Q:`/`A:`-prefixed paragraphs — which the
+ * site renders as flat prose instead of an accordion. This pass rewrites those
+ * into the accordion structure so every post's FAQ looks the same.
+ *
+ * The FAQ section is bounded: it starts at the FAQ heading and ends at the next
+ * `h2` (some posts have sections AFTER the FAQ, e.g. a closing CTA), so only the
+ * FAQ block range is touched. Already-correct FAQs (h3 question + p answer) pass
+ * through unchanged, so this is safe to run repeatedly (idempotent).
+ *
+ * @param {object[]} blocks - Block array from markdownToBlocks
+ * @returns {object[]} Blocks with the FAQ section normalized (new array if a
+ *   FAQ section was found and changed; otherwise the input is returned as-is)
+ */
+export function normalizeFaqBlocks(blocks) {
+  if (!Array.isArray(blocks) || blocks.length === 0) return blocks;
+
+  const isFaqHeading = (b) =>
+    (b.type === 'h2' || b.type === 'h3') &&
+    /^\s*(faqs?\b|frequently\s+asked\s+questions)/i.test(b.text || '');
+
+  const faqIdx = blocks.findIndex(isFaqHeading);
+  if (faqIdx === -1) return blocks;
+
+  // The FAQ section ends at the next h2 heading (content can follow the FAQ).
+  let endIdx = blocks.length;
+  for (let i = faqIdx + 1; i < blocks.length; i++) {
+    if (blocks[i].type === 'h2') { endIdx = i; break; }
+  }
+
+  const before = blocks.slice(0, faqIdx);
+  const section = blocks.slice(faqIdx + 1, endIdx); // FAQ items (heading excluded)
+  const after = blocks.slice(endIdx);
+
+  // Consistent, accordion-triggering heading. Spread the original block first so
+  // any extra keys and the existing key order are preserved — this keeps the
+  // pass a true no-op for posts whose FAQ is already correct (no spurious churn).
+  const out = [{ ...blocks[faqIdx], type: 'h2', text: 'Frequently Asked Questions' }];
+
+  for (const b of section) {
+    if (b.type === 'p' && typeof b.text === 'string') {
+      const t = b.text.trim();
+
+      // "Q: <question>" — the answer may be inline (after a newline) or in the
+      // following paragraph.
+      const qMatch = t.match(/^Q\s*[:.)-]\s*([\s\S]+)$/i);
+      if (qMatch) {
+        const rest = qMatch[1];
+        const nl = rest.indexOf('\n');
+        if (nl !== -1) {
+          const question = rest.slice(0, nl).trim();
+          const answer = rest.slice(nl + 1).trim().replace(/^A\s*[:.)-]\s*/i, '').trim();
+          out.push({ type: 'h3', text: question });
+          if (answer) out.push({ type: 'p', text: answer });
+        } else {
+          out.push({ type: 'h3', text: rest.trim() });
+        }
+        continue;
+      }
+
+      // "A: <answer>" — plain answer paragraph, strip the prefix.
+      const aMatch = t.match(/^A\s*[:.)-]\s*([\s\S]+)$/i);
+      if (aMatch) {
+        out.push({ type: 'p', text: aMatch[1].trim() });
+        continue;
+      }
+    }
+
+    // Already-structured (h3 question, normal answer paragraph, list, etc.).
+    out.push(b);
+  }
+
+  return [...before, ...out, ...after];
 }
 
 /**

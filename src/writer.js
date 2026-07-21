@@ -70,6 +70,12 @@ export async function writePost(topic) {
     9. NO TABLES: Never use markdown tables. Present comparisons or structured data as bulleted lists instead.
     10. NO EMOJI: Never use emoji anywhere in the post, including checkmarks like ✅.
     11. NO LINKS OR PLACEHOLDERS: Never include markdown hyperlinks or square-bracketed placeholder text (like "[Explore our programmes...]"). Plain text only; refer to things by name.
+    12. FAQ FORMATTING (only if you include an FAQ): The section MUST begin with the H2 heading exactly "## Frequently Asked Questions" (never just "## FAQ" or "## FAQ: ..."). Format EACH question as its own H3 subheading ("### Is X worth it?") with the answer in one or more normal paragraphs directly beneath it. NEVER prefix questions or answers with "Q:" or "A:", and never combine a question and its answer into a single paragraph. Example:
+       ## Frequently Asked Questions
+
+       ### Do I need a degree to get started?
+
+       No. Many people enter through accredited short courses and a strong portfolio...
 
     RESPONSE FORMAT:
     You must respond ONLY with a valid JSON object matching the following structure.
