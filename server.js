@@ -90,8 +90,8 @@ app.get('/api/cron/refresh-topics', async (req, res) => {
     const appUrl = process.env.APP_URL || 'https://melsoft-blog.vercel.app';
     const list = candidates.slice(0, 10).map((c, i) => `${i + 1}. ${c.title}`).join('\n');
     const message = candidates.length
-      ? `🔔 **Fresh blog topics generated** — ${candidates.length} candidate${candidates.length === 1 ? '' : 's'}\nReview them at ${appUrl}\n${list}`
-      : `🔔 Topic research ran but found no recent candidates this time.\n${appUrl}`;
+      ? `🔔 **Fresh blog topics generated** — ${candidates.length} new candidate${candidates.length === 1 ? '' : 's'}\n\n👉 **Open the blog agent:** ${appUrl}\n\n${list}`
+      : `🔔 Topic research ran but found no recent candidates this time.\n\n👉 **Open the blog agent:** ${appUrl}`;
     await notifyDiscord(message);
 
     return res.json({ ok: true, refreshedAt: new Date().toISOString(), count: candidates.length });
