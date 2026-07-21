@@ -1271,27 +1271,74 @@
         <div class="list-tabs">
           <button type="button" id="tab-draft" class="list-tab active" onclick="switchTab(event, 'draft')">Drafts</button>
           <button type="button" id="tab-published" class="list-tab" onclick="switchTab(event, 'published')">Published</button>
+          <button type="button" id="tab-topics" class="list-tab" onclick="switchTab(event, 'topics')">Topics</button>
         </div>
         <div style="display: flex; gap: 0.75rem;">
-          <button type="button" id="refresh-btn" class="btn btn-secondary" onclick="loadList(event)">
+          <button type="button" id="refresh-btn" class="btn btn-secondary" onclick="refreshActive(event)">
             <svg width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path d="M4 4v5h.582m15.356 2A8.001 8.001 0 1121.21 8H18" stroke-linecap="round" stroke-linejoin="round"/></svg>
             Refresh
           </button>
         </div>
       </div>
       
-      <div id="drafts-loading" style="text-align: center; padding: 3rem; display: none;">
-        <div class="spinner"></div>
-        <p style="margin-top: 1rem; color: var(--text-secondary);">Loading drafts from Supabase...</p>
+      <!-- Posts area (Drafts + Published tabs) -->
+      <div id="posts-area">
+        <div id="drafts-loading" style="text-align: center; padding: 3rem; display: none;">
+          <div class="spinner"></div>
+          <p style="margin-top: 1rem; color: var(--text-secondary);">Loading drafts from Supabase...</p>
+        </div>
+
+        <div id="drafts-list" class="drafts-grid">
+          <!-- Draft cards will be rendered here dynamically -->
+        </div>
+
+        <div id="drafts-empty" class="empty-state" style="display: none;">
+          <div class="empty-state-title">No pending drafts</div>
+          <p class="empty-state-desc">All generated blog posts have been successfully reviewed or published.</p>
+        </div>
       </div>
 
-      <div id="drafts-list" class="drafts-grid">
-        <!-- Draft cards will be rendered here dynamically -->
-      </div>
-      
-      <div id="drafts-empty" class="empty-state" style="display: none;">
-        <div class="empty-state-title">No pending drafts</div>
-        <p class="empty-state-desc">All generated blog posts have been successfully reviewed or published.</p>
+      <!-- Topics area (Topics tab): add-your-own + trending -->
+      <div id="topics-area" style="display: none;">
+        <div class="edit-panel" style="margin-bottom: 1.5rem;">
+          <div class="edit-panel-section-title">Add your own topic</div>
+          <div class="form-group">
+            <label for="custom-title">Topic title</label>
+            <input type="text" id="custom-title" class="input-field" placeholder="e.g. How SMEs in South Africa can adopt AI safely">
+          </div>
+          <div class="form-group">
+            <label for="custom-pitch">Angle / pitch (optional)</label>
+            <textarea id="custom-pitch" class="input-field" placeholder="One line on the angle or what the post should cover..."></textarea>
+          </div>
+          <div class="form-row">
+            <div class="form-group">
+              <label for="custom-pillar">Pillar</label>
+              <select id="custom-pillar" class="select-field">
+                <option value="tech">Tech</option>
+                <option value="skills">Skills</option>
+              </select>
+            </div>
+            <div class="form-group">
+              <label for="custom-type">Type</label>
+              <select id="custom-type" class="select-field">
+                <option value="evergreen">Evergreen</option>
+                <option value="recent">Recent</option>
+              </select>
+            </div>
+          </div>
+          <button type="button" id="custom-generate-btn" class="btn btn-primary" onclick="generateCustomTopic(event)">Generate post</button>
+        </div>
+
+        <div class="edit-panel-section-title" style="margin: 0 0 1rem;">Trending topics</div>
+        <div id="trending-loading" style="text-align: center; padding: 3rem; display: none;">
+          <div class="spinner"></div>
+          <p style="margin-top: 1rem; color: var(--text-secondary);">Loading trending topics...</p>
+        </div>
+        <div id="trending-list" class="drafts-grid"></div>
+        <div id="trending-empty" class="empty-state" style="display: none;">
+          <div class="empty-state-title">No trending topics right now</div>
+          <p class="empty-state-desc">Try again shortly, or add your own topic above.</p>
+        </div>
       </div>
     </div>
 
@@ -1431,7 +1478,9 @@
     let currentDraftId = null;
     let currentDraftBodyBlocks = [];
     let currentUploadedImageUrl = '';
-    let currentTab = 'draft'; // 'draft' | 'published' — which list tab is active
+    let currentTab = 'draft'; // 'draft' | 'published' | 'topics' — active list tab
+    let trendingTopics = [];  // candidate topics currently shown on the Topics tab
+    let isGenerating = false; // guard: a post generation is in flight
 
     // Initialize Supabase
     try {
@@ -1565,13 +1614,26 @@
     // ----------------------------------------------------
     // List View Operations
     // ----------------------------------------------------
-    // Switch between the Drafts and Published tabs.
+    // Switch between the Drafts, Published and Topics tabs.
     function switchTab(e, tab) {
       if (e) e.preventDefault();
       currentTab = tab;
-      document.getElementById('tab-draft').classList.toggle('active', tab === 'draft');
-      document.getElementById('tab-published').classList.toggle('active', tab === 'published');
-      loadList();
+      ['draft', 'published', 'topics'].forEach(t => {
+        const btn = document.getElementById('tab-' + t);
+        if (btn) btn.classList.toggle('active', t === tab);
+      });
+      const isTopics = tab === 'topics';
+      document.getElementById('posts-area').style.display = isTopics ? 'none' : 'block';
+      document.getElementById('topics-area').style.display = isTopics ? 'block' : 'none';
+      if (isTopics) loadTrending();
+      else loadList();
+    }
+
+    // Refresh button — reloads whichever tab is active.
+    function refreshActive(e) {
+      if (e) e.preventDefault();
+      if (currentTab === 'topics') loadTrending();
+      else loadList();
     }
 
     // Loads the posts for the active tab (draft or published) into the grid.
@@ -1665,6 +1727,110 @@
     }
 
     // ----------------------------------------------------
+    // Topics tab: trending topics + custom topic generation
+    // ----------------------------------------------------
+    // Attaches the Supabase bearer token so the billed /api routes accept the call.
+    async function authHeaders(extra = {}) {
+      const { data } = await supabaseClient.auth.getSession();
+      const token = data && data.session && data.session.access_token;
+      return { ...extra, ...(token ? { Authorization: 'Bearer ' + token } : {}) };
+    }
+
+    async function loadTrending(e) {
+      if (e && e.preventDefault) e.preventDefault();
+      if (!supabaseClient) return;
+
+      const loader = document.getElementById('trending-loading');
+      const list = document.getElementById('trending-list');
+      const empty = document.getElementById('trending-empty');
+
+      list.innerHTML = '';
+      empty.style.display = 'none';
+      loader.style.display = 'block';
+
+      try {
+        const resp = await fetch('/api/topics', { headers: await authHeaders() });
+        if (resp.status === 401) { showStatus('Your session expired — please sign in again.', 'error'); return; }
+        if (!resp.ok) throw new Error('Server returned ' + resp.status);
+        const data = await resp.json();
+        trendingTopics = data.topics || [];
+
+        if (!trendingTopics.length) { empty.style.display = 'block'; return; }
+
+        trendingTopics.forEach((t, i) => {
+          const card = document.createElement('div');
+          card.className = 'draft-card';
+          card.innerHTML = `
+            <div class="draft-card-header">
+              <span class="draft-card-date">${escapeHTML((t.pillar || '') + ' · ' + (t.type || ''))}</span>
+            </div>
+            <h3 class="draft-card-title">${escapeHTML(t.title || 'Untitled topic')}</h3>
+            <p class="draft-card-excerpt">${escapeHTML(t.pitch || '')}</p>
+            <div class="draft-card-actions">
+              <button type="button" class="btn btn-primary btn-sm" onclick="generateTopic(${i})">Generate post</button>
+            </div>
+          `;
+          list.appendChild(card);
+        });
+      } catch (err) {
+        showStatus('Failed to load trending topics: ' + err.message, 'error');
+      } finally {
+        loader.style.display = 'none';
+      }
+    }
+
+    function generateTopic(index) {
+      const topic = trendingTopics[index];
+      if (topic) runGeneration(topic);
+    }
+
+    function generateCustomTopic(e) {
+      if (e) e.preventDefault();
+      const title = document.getElementById('custom-title').value.trim();
+      if (!title) { showStatus('Enter a topic title first.', 'error'); return; }
+      const pitch = document.getElementById('custom-pitch').value.trim();
+      const topic = {
+        title,
+        pitch: pitch || title,
+        pillar: document.getElementById('custom-pillar').value,
+        type: document.getElementById('custom-type').value,
+        sourceNotes: 'Manually added from the dashboard'
+      };
+      runGeneration(topic);
+    }
+
+    // Shared: generate a post for a topic via /api/approve, then open the draft.
+    async function runGeneration(topic) {
+      if (isGenerating) return;
+      if (!supabaseClient) return;
+      if (!confirm(`Generate a blog post for:\n\n"${topic.title}"\n\nThis runs a billed AI generation (about 30-60 seconds) and saves it as a draft.`)) return;
+
+      isGenerating = true;
+      showStatus(`Generating your blog post for "${topic.title}"… this can take up to a minute.`, 'success', 0);
+      try {
+        const resp = await fetch('/api/approve', {
+          method: 'POST',
+          headers: await authHeaders({ 'Content-Type': 'application/json' }),
+          body: JSON.stringify({ topic })
+        });
+        if (resp.status === 401) { showStatus('Your session expired — please sign in again.', 'error'); return; }
+        const result = await resp.json().catch(() => ({}));
+        if (!resp.ok) throw new Error(result.details || result.error || 'Generation failed');
+
+        showStatus('Draft created successfully — opening it for review.', 'success');
+        if (result.draftId) {
+          openDraft(null, result.draftId);
+        } else {
+          switchTab(null, 'draft');
+        }
+      } catch (err) {
+        showStatus('Generation failed: ' + err.message, 'error');
+      } finally {
+        isGenerating = false;
+      }
+    }
+
+    // ----------------------------------------------------
     // Detail / Edit View Operations
     // ----------------------------------------------------
     async function openDraft(e, draftId) {
@@ -1737,7 +1903,7 @@
       currentDraftBodyBlocks = [];
       currentUploadedImageUrl = '';
       showView('list-view');
-      loadList();
+      switchTab(null, currentTab);
     }
 
     // ----------------------------------------------------
