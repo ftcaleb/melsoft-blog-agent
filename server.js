@@ -1,6 +1,8 @@
 import express from 'express';
 import dotenv from 'dotenv';
 import crypto from 'crypto';
+import path from 'path';
+import { fileURLToPath } from 'url';
 import { generateCandidates } from './src/research.js';
 import { selectTopics } from './src/select.js';
 import { writePost } from './src/writer.js';
@@ -8,6 +10,10 @@ import { supabase } from './src/supabaseClient.js';
 import { markdownToBlocks, computeReadTime } from './src/markdownToBlocks.js';
 
 dotenv.config();
+
+// Resolve paths relative to this file (not the CWD) so static serving works the
+// same whether run directly on Render or bundled into a Vercel serverless function.
+const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
 const app = express();
 const PORT = process.env.PORT || 3000;
@@ -61,7 +67,7 @@ if (BASIC_AUTH_USER && BASIC_AUTH_PASS) {
 }
 
 // Serve static files from the public folder
-app.use(express.static('public'));
+app.use(express.static(path.join(__dirname, 'public')));
 
 // In-flight lock: coalesces concurrent/rapid /api/topics requests into a single
 // run so a spammed refresh button (or parallel tabs) can't trigger multiple
@@ -174,6 +180,16 @@ app.post('/api/approve', async (req, res) => {
   }
 });
 
-app.listen(PORT, () => {
-  console.log(`Server is running on http://localhost:${PORT}`);
-});
+// Start a real HTTP server only when this file is run directly (e.g. `npm start`
+// on Render, or local dev). On Vercel the app is imported by api/index.js and
+// invoked per-request, so app.listen must NOT run in that environment.
+const isMainModule = process.argv[1] && fileURLToPath(import.meta.url) === path.resolve(process.argv[1]);
+if (isMainModule) {
+  app.listen(PORT, () => {
+    console.log(`Server is running on http://localhost:${PORT}`);
+  });
+}
+
+// Exported so a Vercel serverless function (api/index.js) can use the Express
+// app as its request handler.
+export default app;
