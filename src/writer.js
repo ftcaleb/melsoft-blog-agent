@@ -56,7 +56,7 @@ export async function writePost(topic) {
     Source Notes: "${topic.sourceNotes}"
     
     CRITICAL WRITING RULES:
-    1. EDUCATION FIRST: The post must teach the reader. It must contain definitions, frameworks, step-by-step guidance, South African context, concrete examples, a "what to do next" section, and an FAQ answering real search queries related to this topic. Target a comprehensive length of 1200 to 1800 words.
+    1. EDUCATION FIRST, BUT CONCISE: The post must teach the reader clearly and get to the point quickly — no padding, no filler. Target a SHORT length of roughly 500 to 800 words total. Include only: a brief definition/context, the 2 to 4 most important points (with quick South African context and a concrete example where it genuinely helps), and a short "what to do next" takeaway. An FAQ is OPTIONAL — include at most 2 or 3 short Q&As only if they add real value, otherwise omit it entirely. Favour short paragraphs and scannable subheadings over exhaustive coverage.
     2. DUAL AUDIENCE: Write naturally for both:
        - Individual learners (B2C) trying to decide what digital or vocational skill to learn next.
        - Executives and HR managers (B2B) responsible for corporate training budgets, Skills Development Levy (SDL) recovery, and B-BBEE skills development scoring.
@@ -77,7 +77,7 @@ export async function writePost(topic) {
     {
       "title": "string (refined, SEO-optimized title)",
       "metaDescription": "string (150-160 characters, keyword-optimized)",
-      "bodyMarkdown": "string (the full body of the post in markdown, containing headings, the complete article body, the 'what to do next' section, and the FAQ)"
+      "bodyMarkdown": "string (the full body of the post in markdown, kept concise at roughly 500-800 words: headings, a tight article body, a short 'what to do next' takeaway, and an optional brief FAQ)"
     }
   `;
 
