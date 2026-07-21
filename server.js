@@ -7,6 +7,7 @@ import { selectTopics } from './src/select.js';
 import { writePost } from './src/writer.js';
 import { supabase } from './src/supabaseClient.js';
 import { markdownToBlocks, computeReadTime } from './src/markdownToBlocks.js';
+import { registerDiscordRoutes } from './src/discordInteractions.js';
 
 dotenv.config();
 
@@ -16,6 +17,14 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
 const app = express();
 const PORT = process.env.PORT || 3000;
+
+// Discord interactions endpoint — MUST be registered BEFORE the global
+// express.json() below. Discord's Ed25519 signature verification needs the raw,
+// unparsed request body; if express.json() ran first it would consume the
+// stream and verification would fail with a misleading 401. This route fully
+// handles its own response, so it never falls through to the JSON parser, and
+// no other route is affected (they are all registered after express.json()).
+registerDiscordRoutes(app);
 
 // Enable JSON parsing middleware
 app.use(express.json());
