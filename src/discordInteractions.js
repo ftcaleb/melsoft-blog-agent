@@ -335,7 +335,7 @@ export function registerDiscordRoutes(app) {
           }
           const topic = getOption(interaction, 'topic');
           if (!topic) return ephemeral(res, 'Please provide a `topic`.');
-          defer(res, true); // ephemeral: only the invoker sees the result
+          defer(res, false); // public: visible to the whole channel
           keepAlive(handleGenerateDeferred(interaction, topic));
           return;
         }
@@ -346,7 +346,7 @@ export function registerDiscordRoutes(app) {
           }
           const slug = getOption(interaction, 'slug');
           if (!slug) return ephemeral(res, 'Please provide a `slug`.');
-          defer(res, true);
+          defer(res, false); // public: visible to the whole channel
           keepAlive(handlePublishDeferred(interaction, slug));
           return;
         }
@@ -369,7 +369,7 @@ export function registerDiscordRoutes(app) {
             return ephemeral(res, "You're not authorized to generate posts.");
           }
           if (!payload) return ephemeral(res, 'This button is missing a topic.');
-          defer(res, true);
+          defer(res, false); // public: visible to the whole channel
           keepAlive(handleGenerateDeferred(interaction, payload));
           return;
         }
@@ -379,7 +379,7 @@ export function registerDiscordRoutes(app) {
             return ephemeral(res, "You're not authorized to publish posts.");
           }
           if (!payload) return ephemeral(res, 'This button is missing a slug.');
-          defer(res, true);
+          defer(res, false); // public: visible to the whole channel
           keepAlive(handlePublishDeferred(interaction, payload));
           return;
         }
