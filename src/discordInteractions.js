@@ -199,14 +199,21 @@ async function runPublish(slug) {
 // Uses node's built-in fetch, same one-way pattern as notifyDiscord() in
 // server.js. The interaction token authorizes this call, so no bot token is
 // needed and nothing secret is logged.
-async function editOriginalResponse(interaction, content) {
+async function editOriginalResponse(interaction, content, components) {
   const applicationId = interaction.application_id || process.env.DISCORD_APPLICATION_ID;
   const url = `${DISCORD_API_BASE}/webhooks/${applicationId}/${interaction.token}/messages/@original`;
+  const payload = { content: String(content).slice(0, 1990) };
+  // Interaction followups are application-owned, so message components (buttons)
+  // render natively — no ?with_components=true needed. Only attach when provided
+  // so existing callers (publish/topics) are unaffected.
+  if (Array.isArray(components) && components.length > 0) {
+    payload.components = components;
+  }
   try {
     const resp = await fetch(url, {
       method: 'PATCH',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ content: String(content).slice(0, 1990) }),
+      body: JSON.stringify(payload),
     });
     if (!resp.ok) console.warn(`[discord] Followup edit responded ${resp.status}`);
   } catch (err) {
@@ -238,13 +245,36 @@ async function handleGenerateDeferred(interaction, topicInput) {
   try {
     const { slug, title, excerpt } = await runGenerate(topicInput);
     const preview = (excerpt || '').slice(0, 300);
-    await editOriginalResponse(
-      interaction,
+    const content =
       `Draft ready: **${title}**\n` +
-        (preview ? `> ${preview}\n` : '') +
-        `Slug: \`${slug}\`\n` +
-        `Review the full draft in the dashboard: ${appUrl()}/dashboard.html`
-    );
+      (preview ? `> ${preview}\n` : '') +
+      `Slug: \`${slug}\`\n` +
+      `Review the full draft in the dashboard: ${appUrl()}/dashboard.html`;
+
+    // One-click Publish button (green / style 3) that reuses the EXISTING
+    // publish:<slug> MESSAGE_COMPONENT handler — no new routing. Authorization
+    // is enforced there (DISCORD_ALLOWED_USER_IDS); no extra confirmation step.
+    // Skipped only if the custom_id would exceed Discord's 100-char limit; the
+    // slug is in the text either way, so `/publish <slug>` still works.
+    const publishCustomId = `publish:${slug}`;
+    const components =
+      publishCustomId.length <= 100
+        ? [
+            {
+              type: 1, // ACTION_ROW
+              components: [
+                {
+                  type: 2, // BUTTON
+                  style: 3, // SUCCESS (green) — distinct from the blue Generate buttons
+                  label: 'Publish',
+                  custom_id: publishCustomId,
+                },
+              ],
+            },
+          ]
+        : undefined;
+
+    await editOriginalResponse(interaction, content, components);
   } catch (err) {
     console.warn('[discord] Generate failed:', err.message);
     await editOriginalResponse(interaction, `Could not generate that draft: ${err.message}`);
