@@ -17,14 +17,15 @@ const __dirname = path.dirname(__filename);
 // Helper to resolve paths from project root
 const getProjectPath = (relPath) => path.resolve(__dirname, '..', relPath);
 
-// Research cache config.
+// Research cache config (Supabase-backed).
 // The expensive part of research is the live web_search call for "recent"
-// trending topics. We cache ONLY that result and auto-expire it after 24h.
-// The brief requires "recent" topics to reflect ~the last two weeks of trends,
-// so an indefinite/permanent cache would silently break that requirement even
-// though the UI would still look fine — hence the hard TTL check below.
-const RESEARCH_CACHE_PATH = getProjectPath('data/research_cache.json');
-const RESEARCH_CACHE_TTL_MS = 24 * 60 * 60 * 1000; // 24 hours
+// trending topics. We cache ONLY that result — in a single Supabase row so it
+// persists across serverless invocations (unlike the old on-disk file, which
+// Vercel's read-only/ephemeral filesystem could not keep). Freshness is driven
+// by the scheduled cron (Tue/Fri) plus an explicit ?fresh=true bypass, so
+// ordinary page loads read the cache and never trigger a billed research call.
+const RESEARCH_CACHE_TABLE = 'research_cache';
+const RESEARCH_CACHE_ROW_ID = 1;
 
 /**
  * Calculates the Levenshtein distance between two strings.
@@ -177,36 +178,38 @@ ${excludedSection}
 }
 
 /**
- * Forces a live regeneration of the recent-candidates cache and persists it
- * with a generatedAt timestamp. Kept deliberately separate from any request
- * handling so a future scheduler (for the 3x/week publishing cadence) can call
- * this directly on a daily cron with zero rework.
+ * Forces a live regeneration of the recent-candidates cache and persists it to
+ * the Supabase research_cache row. Called by the Tue/Fri cron
+ * (/api/cron/refresh-topics) and on an explicit ?fresh=true bypass.
  *
  * @returns {Promise<Array>} The freshly fetched recent candidates
  */
 export async function refreshResearchCache() {
   const candidates = await fetchRecentCandidates();
-  const payload = { generatedAt: new Date().toISOString(), candidates };
+  const generatedAt = new Date().toISOString();
 
   try {
-    await fs.writeFile(RESEARCH_CACHE_PATH, JSON.stringify(payload, null, 2), 'utf8');
-    console.log(`[research] Cache REFRESHED — ${candidates.length} recent candidates written at ${payload.generatedAt}.`);
+    const { error } = await supabase
+      .from(RESEARCH_CACHE_TABLE)
+      .upsert({ id: RESEARCH_CACHE_ROW_ID, generated_at: generatedAt, candidates });
+    if (error) throw error;
+    console.log(`[research] Cache REFRESHED in Supabase — ${candidates.length} recent candidates at ${generatedAt}.`);
   } catch (writeErr) {
-    // A failed write is non-fatal: we still return the candidates for this run.
-    console.warn('[research] Could not persist research cache:', writeErr.message);
+    // Non-fatal: we still return the candidates for this run. This also covers
+    // the case where the research_cache table has not been created yet.
+    console.warn('[research] Could not persist research cache to Supabase:', writeErr.message);
   }
 
   return candidates;
 }
 
 /**
- * Returns recent candidates, using the on-disk cache when it is still valid
- * (under 24h old). Regenerates on cache miss, staleness, or explicit bypass.
- *
- * Bypass (forces live regeneration regardless of cache age) is triggered by:
- *   - forceFresh === true  (e.g. GET /api/topics?fresh=true), or
- *   - process.env.DISABLE_RESEARCH_CACHE === 'true'
- * Both are OFF by default — the 24h cache is the real production behavior.
+ * Returns recent candidates from the Supabase cache. Freshness is driven by the
+ * cron (and ?fresh=true), NOT by a read-time TTL — so ordinary page loads serve
+ * the cache with no billed research call. A live regeneration happens only on:
+ *   - forceFresh === true  (e.g. GET /api/topics?fresh=true),
+ *   - process.env.DISABLE_RESEARCH_CACHE === 'true', or
+ *   - an empty/absent cache (first run, or before the table exists).
  *
  * @param {{ forceFresh?: boolean }} options
  * @returns {Promise<Array>} Array of recent candidate topic objects
@@ -214,45 +217,43 @@ export async function refreshResearchCache() {
 export async function getRecentCandidatesCached({ forceFresh = false } = {}) {
   const bypass = forceFresh || process.env.DISABLE_RESEARCH_CACHE === 'true';
 
-  // Attempt to load the existing cache (may not exist yet).
+  // Load the cached row from Supabase (may not exist yet / table may be absent).
   let cache = null;
-  try {
-    const raw = await fs.readFile(RESEARCH_CACHE_PATH, 'utf8');
-    cache = JSON.parse(raw);
-  } catch (readErr) {
-    // No cache file yet (or unreadable) — will fall through to regeneration.
+  const { data, error } = await supabase
+    .from(RESEARCH_CACHE_TABLE)
+    .select('generated_at, candidates')
+    .eq('id', RESEARCH_CACHE_ROW_ID)
+    .maybeSingle();
+  if (error) {
+    console.warn('[research] Could not read research cache from Supabase (will regenerate):', error.message);
+  } else if (data && Array.isArray(data.candidates)) {
+    cache = data;
   }
 
-  const ageMs = cache && cache.generatedAt
-    ? Date.now() - new Date(cache.generatedAt).getTime()
-    : Infinity;
-  const isValid = cache && Array.isArray(cache.candidates) && ageMs < RESEARCH_CACHE_TTL_MS;
-
-  if (!bypass && isValid) {
-    const ageMin = Math.round(ageMs / 60000);
-    const expiresInMin = Math.round((RESEARCH_CACHE_TTL_MS - ageMs) / 60000);
-    console.log(`[research] Cache HIT — ${cache.candidates.length} recent candidates (age ${ageMin} min, expires in ${expiresInMin} min).`);
+  // Serve the cache whenever it exists and we are not explicitly bypassing.
+  if (!bypass && cache && cache.candidates.length > 0) {
+    const ageMin = cache.generated_at
+      ? Math.round((Date.now() - new Date(cache.generated_at).getTime()) / 60000)
+      : null;
+    console.log(`[research] Cache HIT — ${cache.candidates.length} recent candidates${ageMin != null ? ` (age ${ageMin} min)` : ''}.`);
     return cache.candidates;
   }
 
   if (bypass) {
     const reason = forceFresh ? 'fresh=true query param' : 'DISABLE_RESEARCH_CACHE=true';
     console.log(`[research] Cache BYPASS — forcing live regeneration (${reason}).`);
-  } else if (!cache) {
-    console.log('[research] Cache MISS — no cache file found, regenerating.');
   } else {
-    console.log(`[research] Cache STALE — age ${Math.round(ageMs / 60000)} min exceeds 24h TTL, regenerating.`);
+    console.log('[research] Cache MISS — no cached candidates, regenerating.');
   }
 
   try {
     return await refreshResearchCache();
-  } catch (error) {
-    // Live regeneration failed. Rather than silently returning nothing (which
-    // would look like "working" but drop all recent topics), fall back to the
-    // stale cache if we have one, and make the degradation explicit in logs.
-    console.error('[research] Live regeneration FAILED:', error.message);
+  } catch (regenErr) {
+    // Live regeneration failed — fall back to whatever cache we have rather than
+    // silently dropping all recent topics.
+    console.error('[research] Live regeneration FAILED:', regenErr.message);
     if (cache && Array.isArray(cache.candidates)) {
-      console.warn(`[research] Falling back to STALE cache (age ${Math.round(ageMs / 60000)} min).`);
+      console.warn('[research] Falling back to cached candidates.');
       return cache.candidates;
     }
     console.warn('[research] No cache available to fall back on — returning no recent candidates.');

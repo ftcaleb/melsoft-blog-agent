@@ -2,7 +2,7 @@ import express from 'express';
 import dotenv from 'dotenv';
 import path from 'path';
 import { fileURLToPath } from 'url';
-import { generateCandidates } from './src/research.js';
+import { generateCandidates, refreshResearchCache } from './src/research.js';
 import { selectTopics } from './src/select.js';
 import { writePost } from './src/writer.js';
 import { supabase } from './src/supabaseClient.js';
@@ -50,6 +50,28 @@ async function requireAuth(req, res, next) {
     return res.status(401).json({ error: 'Authentication check failed' });
   }
 }
+
+// Scheduled research-cache refresh (Vercel cron). Authenticated by CRON_SECRET,
+// which Vercel injects as "Authorization: Bearer <CRON_SECRET>" on cron
+// requests — NOT the Supabase session — so it is registered BEFORE the
+// requireAuth gate below. It regenerates the recent-topics research and stores
+// it in Supabase; nothing is written to the posts table.
+app.get('/api/cron/refresh-topics', async (req, res) => {
+  const secret = process.env.CRON_SECRET;
+  const auth = req.headers.authorization || '';
+  if (!secret || auth !== `Bearer ${secret}`) {
+    return res.status(401).json({ error: 'Unauthorized' });
+  }
+  try {
+    console.log('[cron] Refreshing research cache...');
+    const candidates = await refreshResearchCache();
+    console.log(`[cron] Research cache refreshed: ${candidates.length} candidates.`);
+    return res.json({ ok: true, refreshedAt: new Date().toISOString(), count: candidates.length });
+  } catch (err) {
+    console.error('[cron] Refresh failed:', err);
+    return res.status(500).json({ error: 'Refresh failed', details: err.message });
+  }
+});
 
 app.use('/api', requireAuth);
 
