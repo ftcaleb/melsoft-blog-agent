@@ -2,7 +2,14 @@
   "permissions": {
     "allow": [
       "Bash(node -e ' *)",
-      "Read(//c/Users/brend/.claude/projects/c--Users-brend-Desktop-melsoft-blog-agent/memory/**)"
+      "Read(//c/Users/brend/.claude/projects/c--Users-brend-Desktop-melsoft-blog-agent/memory/**)",
+      "Bash(grep -rnE \"C:\\\\\\\\\\\\\\\\|/Users/|localhost|127\\\\.0\\\\.0\\\\.1\" server.js src/)",
+      "Bash(grep -nE \"^\\\\.env|\\(^|/\\)\\\\.env$|\\\\.env\" .gitignore)",
+      "Bash(git push *)",
+      "Bash(git merge *)",
+      "Bash(git branch *)",
+      "Bash(node -e \"console.log\\(require\\('crypto'\\).randomBytes\\(18\\).toString\\('base64'\\).replace\\(/[+/=]/g,''\\).slice\\(0,24\\)\\)\")",
+      "Bash(curl -s -I --max-time 90 https://melsoft-blog-agent.onrender.com)"
     ],
     "additionalDirectories": [
       "c:\\Users\\brend\\.claude\\projects\\c--Users-brend-Desktop-melsoft-blog-agent\\memory"
