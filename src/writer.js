@@ -6,6 +6,7 @@ import path from 'path';
 import fs from 'fs/promises';
 import { jsonrepair } from 'jsonrepair';
 import { logAnthropicUsage } from './usage.js';
+import { getKeywordsForTopic, classifyCluster } from './keywords.js';
 
 // Load environment variables
 dotenv.config();
@@ -27,6 +28,52 @@ export function generateSlug(title) {
 }
 
 /**
+ * Last-resort recovery when JSON.parse and jsonrepair both fail — typically
+ * because the model left an unescaped double quote inside a string value. The
+ * response shape is fixed ({ title, metaDescription, bodyMarkdown } in that
+ * order), so we extract each field's value as the text between its opening quote
+ * and the closing quote just before the next key (or the end for bodyMarkdown).
+ * This tolerates stray double quotes inside the values, then unescapes the
+ * standard JSON escapes.
+ *
+ * @param {string} raw The (fence/cite-stripped) response text
+ * @returns {object|null} { title, metaDescription, bodyMarkdown } or null
+ */
+function lenientExtractPost(raw) {
+  const valueBetween = (key, nextMarker) => {
+    const k = raw.indexOf(`"${key}"`);
+    if (k === -1) return null;
+    const colon = raw.indexOf(':', k + key.length + 2);
+    if (colon === -1) return null;
+    const open = raw.indexOf('"', colon + 1);
+    if (open === -1) return null;
+    const boundary = nextMarker ? raw.indexOf(nextMarker, open + 1) : -1;
+    const searchEnd = boundary === -1 ? raw.length : boundary;
+    const close = raw.lastIndexOf('"', searchEnd - 1);
+    if (close <= open) return null;
+    return raw.slice(open + 1, close);
+  };
+
+  const unescape = (s) =>
+    (s || '')
+      .replace(/\\n/g, '\n')
+      .replace(/\\t/g, '\t')
+      .replace(/\\"/g, '"')
+      .replace(/\\\\/g, '\\');
+
+  const title = valueBetween('title', '"metaDescription"');
+  const metaDescription = valueBetween('metaDescription', '"bodyMarkdown"');
+  const bodyMarkdown = valueBetween('bodyMarkdown', null);
+
+  if (!title || !bodyMarkdown) return null;
+  return {
+    title: unescape(title),
+    metaDescription: unescape(metaDescription),
+    bodyMarkdown: unescape(bodyMarkdown),
+  };
+}
+
+/**
  * Generates a complete, publish-ready blog post based on a topic candidate.
  * Uses the Anthropic Claude API with web_search to verify statistics.
  * 
@@ -45,6 +92,20 @@ export async function writePost(topic) {
 
   const anthropic = new Anthropic({ apiKey });
 
+  // Resolve the topic's cluster once (used both to route SEO keywords and to
+  // persist the tag on the post for per-cluster performance reporting). Null
+  // when it can't be classified. Passed into getKeywordsForTopic so the keywords
+  // surfaced match the cluster we store.
+  const cluster = topic.cluster || classifyCluster(topic);
+
+  // Surface relevant SEO keywords for this topic's cluster so the model can
+  // weave them in naturally. Empty when no keywords are available — keywordLine
+  // then contributes nothing to the prompt.
+  const relevantKeywords = getKeywordsForTopic({ ...topic, cluster });
+  const keywordLine = relevantKeywords.length
+    ? `Relevant SEO Keywords (weave these naturally where they fit — do not force them, do not keyword-stuff, do not list them verbatim): ${relevantKeywords.join(', ')}`
+    : '';
+
   const promptText = `
     You are an elite educational copywriter writing an article for Melsoft Academy, a South African training provider.
     Your task is to write a comprehensive, long-form, publish-ready blog post based on the following topic details:
@@ -54,7 +115,8 @@ export async function writePost(topic) {
     Pillar: "${topic.pillar}"
     Type: "${topic.type}"
     Source Notes: "${topic.sourceNotes}"
-    
+    ${keywordLine}
+
     CRITICAL WRITING RULES:
     1. EDUCATION FIRST, BUT CONCISE: The post must teach the reader clearly and get to the point quickly — no padding, no filler. Target a SHORT length of roughly 500 to 800 words total. Include only: a brief definition/context, the 2 to 4 most important points (with quick South African context and a concrete example where it genuinely helps), and a short "what to do next" takeaway. An FAQ is OPTIONAL — include at most 2 or 3 short Q&As only if they add real value, otherwise omit it entirely. Favour short paragraphs and scannable subheadings over exhaustive coverage.
     2. DUAL AUDIENCE: Write naturally for both:
@@ -76,10 +138,29 @@ export async function writePost(topic) {
        ### Do I need a degree to get started?
 
        No. Many people enter through accredited short courses and a strong portfolio...
+    13. SEO KEYWORD USE (only if a "Relevant SEO Keywords" line is provided above):
+    - TITLE & META DESCRIPTION: Identify the single highest-relevance keyword
+      from the list. That keyword (or an unmistakably close variant — e.g.
+      "course" may become "courses") MUST appear in the title, the meta
+      description, or both. This is a requirement, not a suggestion — find a
+      natural way to include it rather than skipping it. Only omit it entirely
+      if literally no phrasing exists that avoids being grammatically broken
+      or nonsensical.
+    - BODY: Use the remaining keywords naturally in the body ONLY where they
+      genuinely fit the sentence and topic. Never force a keyword that does not
+      fit naturally — skip it instead. Body keyword usage must never compromise
+      rule 1 (tight, non-padded writing) or rule 7 (objective, genuinely-valuable
+      tone): if working a keyword in would add filler or make the copy read like
+      an advert, leave it out.
 
     RESPONSE FORMAT:
     You must respond ONLY with a valid JSON object matching the following structure.
     Do NOT include markdown code fences (like \`\`\`json), preamble, explanations, or postscript.
+
+    JSON SAFETY — the response is parsed programmatically, so invalid JSON is discarded:
+    - Do NOT use the double-quote character anywhere inside bodyMarkdown, title, or metaDescription. If you need quotation marks or want to emphasise a phrase, use single quotes instead. Unescaped double quotes break the JSON.
+    - Do NOT output any tags: no <cite> tags, no XML, and no HTML. Write plain markdown only, and attribute sources in plain text (for example: according to Stats SA).
+    - Escape any remaining special characters correctly (newlines as \\n).
     {
       "title": "string (refined, SEO-optimized title)",
       "metaDescription": "string (150-160 characters, keyword-optimized)",
@@ -112,6 +193,13 @@ export async function writePost(topic) {
     responseText = responseText.replace(/^```(?:json)?\n?/i, '').replace(/\n?```$/i, '').trim();
   }
 
+  // Defensive: remove any <cite ...> / </cite> tags from the RAW text before
+  // parsing. web_search responses sometimes wrap cited claims in <cite> tags
+  // whose attributes carry quotes; stripping them here (in addition to the
+  // post-parse cleanup below) keeps them from ever contributing to a JSON parse
+  // failure. Safe because these tags are never valid post content anyway.
+  responseText = responseText.replace(/<\/?cite\b[^>]*>/gi, '');
+
   // Extract JSON object substring to strip any preamble or postscript text
   const firstBrace = responseText.indexOf('{');
   const lastBrace = responseText.lastIndexOf('}');
@@ -129,8 +217,13 @@ export async function writePost(topic) {
       parsedPost = JSON.parse(repairedText);
       console.log('[writer] JSON repaired and parsed successfully!');
     } catch (repairErr) {
-      console.error('Failed to parse and repair Claude JSON response. Raw response was:', responseText);
-      throw new Error(`JSON parsing failed: ${err.message}`);
+      console.warn('[writer] jsonrepair failed. Attempting lenient field extraction...');
+      parsedPost = lenientExtractPost(responseText);
+      if (!parsedPost) {
+        console.error('Failed to parse and repair Claude JSON response. Raw response was:', responseText);
+        throw new Error(`JSON parsing failed: ${err.message}`);
+      }
+      console.log('[writer] Recovered post via lenient field extraction.');
     }
   }
 
@@ -158,6 +251,7 @@ export async function writePost(topic) {
     metaDescription: cleanMeta,
     bodyMarkdown: cleanBody,
     pillar: topic.pillar,
+    cluster,
     type: topic.type,
     sourceTopic: topic.title
   };

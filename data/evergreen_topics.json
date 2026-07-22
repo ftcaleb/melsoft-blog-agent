@@ -1,32 +1,182 @@
 [
   {
-    "title": "How Learnerships Work in South Africa: A Comprehensive Guide",
-    "pitch": "A breakdown of the SETA-funded learnership model and how South African youth can leverage it to gain skills and work experience.",
-    "pillar": "skills"
+    "title": "How South African Small Businesses Can Start Using AI Tools Responsibly",
+    "pitch": "A practical, jargon-free introduction to adopting everyday AI tools in a small SA business, covering real use cases, costs, and data-privacy pitfalls to avoid.",
+    "pillar": "tech",
+    "cluster": "ai"
   },
   {
-    "title": "A Beginner's Guide to Breaking Into Data Science in SA",
-    "pitch": "An entry-level roadmap to starting a data science career in South Africa, outlining the essential skills and local industry demand.",
-    "pillar": "tech"
+    "title": "AI Prompt Engineering: A Practical New Skill for South African Professionals",
+    "pitch": "What prompt engineering is, why it is becoming a valued workplace skill in South Africa, and how beginners can start practising it with free tools.",
+    "pillar": "tech",
+    "cluster": "ai"
   },
   {
-    "title": "Understanding the B-BBEE Skills Development Element",
-    "pitch": "How South African enterprises can optimize their B-BBEE scorecard through strategic skills development and learnerships.",
-    "pillar": "skills"
+    "title": "Machine Learning Explained in Plain Language for South African Beginners",
+    "pitch": "A plain-English guide to what machine learning actually is, where South Africans encounter it daily, and the foundational skills needed to work with it.",
+    "pillar": "tech",
+    "cluster": "ai"
   },
   {
-    "title": "Demystifying the QCTO: The New Era of Occupational Qualifications",
-    "pitch": "What the transition from old legacy qualifications to the QCTO framework means for South African training providers and learners.",
-    "pillar": "skills"
+    "title": "POPIA Compliance for South African Small Businesses: A Practical Security Checklist",
+    "pitch": "A step-by-step cybersecurity checklist that helps small SA businesses meet POPIA obligations and protect customer data without a big IT budget.",
+    "pillar": "tech",
+    "cluster": "cybersecurity"
   },
   {
-    "title": "AI in South Africa: Opportunities and Challenges for Upskilling",
-    "pitch": "Exploring the local growth of artificial intelligence and how workforce upskilling can prepare South African talent for the future of work.",
-    "pillar": "tech"
+    "title": "How to Build a Ransomware Response Plan for a South African SME",
+    "pitch": "A practical framework for small South African businesses to prepare for, contain, and recover from a ransomware attack before it happens.",
+    "pillar": "tech",
+    "cluster": "cybersecurity"
   },
   {
-    "title": "Cybersecurity 101: Securing Your Digital Assets in SA",
-    "pitch": "Essential cybersecurity best practices tailored for South African businesses and individuals facing rising local cyber threats.",
-    "pillar": "tech"
+    "title": "Phishing Awareness: How South African Employers Can Reduce Human-Error Breaches",
+    "pitch": "Why phishing remains a top breach cause in SA workplaces and how affordable staff awareness training measurably reduces the risk.",
+    "pillar": "tech",
+    "cluster": "cybersecurity"
+  },
+  {
+    "title": "SQL for Beginners: The Data Skill Every South African Office Worker Should Learn",
+    "pitch": "Why SQL is one of the most practical, employable data skills in South Africa and how a complete beginner can start learning it for free.",
+    "pillar": "tech",
+    "cluster": "data"
+  },
+  {
+    "title": "Power BI vs Excel: Choosing the Right Data Tool for a South African Business",
+    "pitch": "A clear comparison to help South African teams decide when to move from spreadsheets to Power BI for reporting and decision-making.",
+    "pillar": "tech",
+    "cluster": "data"
+  },
+  {
+    "title": "How South African Businesses Can Use Data Analytics to Cut Costs",
+    "pitch": "Concrete, non-technical ways South African organisations can use basic data analytics to find savings and make better operational decisions.",
+    "pillar": "tech",
+    "cluster": "data"
+  },
+  {
+    "title": "What Is UX Design? A Career Guide for Aspiring South African Designers",
+    "pitch": "An introduction to user experience design as a career in South Africa, covering what the work involves, local demand, and how to get started.",
+    "pillar": "tech",
+    "cluster": "ux"
+  },
+  {
+    "title": "UX vs UI Design: Understanding the Difference and Which to Learn in South Africa",
+    "pitch": "A beginner-friendly breakdown of how UX and UI design differ, the local job market for each, and how to choose a starting path in SA.",
+    "pillar": "tech",
+    "cluster": "ux"
+  },
+  {
+    "title": "Building a UX Design Portfolio That Gets You Hired in South Africa",
+    "pitch": "Practical guidance on assembling a UX portfolio that appeals to South African employers, even without formal work experience.",
+    "pillar": "tech",
+    "cluster": "ux"
+  },
+  {
+    "title": "Learning to Code in South Africa: How to Choose Your First Programming Language",
+    "pitch": "A practical guide to picking a first programming language based on your goals and the South African job market, with free ways to start.",
+    "pillar": "tech",
+    "cluster": "software"
+  },
+  {
+    "title": "Coding Bootcamp vs Self-Taught: Which Path Into Software Development Suits You in SA",
+    "pitch": "An honest comparison of bootcamps and self-teaching for aspiring South African developers, weighing cost, time, and hireability.",
+    "pillar": "tech",
+    "cluster": "software"
+  },
+  {
+    "title": "What Does a Junior Software Developer Actually Do? A South African Career Guide",
+    "pitch": "A realistic look at the day-to-day work, skills, and salary expectations for junior software developers entering the South African market.",
+    "pillar": "tech",
+    "cluster": "software"
+  },
+  {
+    "title": "The B-BBEE Skills Development Element Explained for South African Employers",
+    "pitch": "A clear guide to how the skills development element of the B-BBEE scorecard works and how employers can earn its points strategically.",
+    "pillar": "skills",
+    "cluster": "bbbee"
+  },
+  {
+    "title": "How to Maximise Your B-BBEE Skills Development Score in South Africa",
+    "pitch": "Practical steps South African businesses can take to get the most scorecard value from their training and learnership spend.",
+    "pillar": "skills",
+    "cluster": "bbbee"
+  },
+  {
+    "title": "B-BBEE Scorecard Basics: What Every South African Business Owner Should Know",
+    "pitch": "A plain-language overview of the B-BBEE scorecard elements and why skills development is one of the most controllable to improve.",
+    "pillar": "skills",
+    "cluster": "bbbee"
+  },
+  {
+    "title": "Employment Equity vs B-BBEE: What South African Employers Need to Understand",
+    "pitch": "How employment equity and B-BBEE relate, where they overlap, and what compliance means in practice for South African workplaces.",
+    "pillar": "skills",
+    "cluster": "bbbee"
+  },
+  {
+    "title": "Turning Skills Development Spend into B-BBEE Points: A Practical Guide",
+    "pitch": "How South African employers can structure their skills development investment so it delivers both real capability and scorecard points.",
+    "pillar": "skills",
+    "cluster": "bbbee"
+  },
+  {
+    "title": "Learnerships vs Internships vs Apprenticeships: What's the Difference in South Africa?",
+    "pitch": "A clear comparison of the three main work-based learning routes in South Africa and how to choose the right one for your goals.",
+    "pillar": "skills",
+    "cluster": "learnerships"
+  },
+  {
+    "title": "How to Apply for a Learnership in South Africa: A Step-by-Step Guide",
+    "pitch": "A practical walkthrough of finding, applying for, and securing a funded learnership as a young South African.",
+    "pillar": "skills",
+    "cluster": "learnerships"
+  },
+  {
+    "title": "What Employers Gain from Hosting Learnerships in South Africa",
+    "pitch": "The business case for South African employers to host learnerships, from tax incentives to talent pipelines and scorecard benefits.",
+    "pillar": "skills",
+    "cluster": "learnerships"
+  },
+  {
+    "title": "Learnership Stipends and Your Rights as a Learner in South Africa",
+    "pitch": "What learners can expect from a learnership agreement in South Africa, including stipends, contracts, and their rights and obligations.",
+    "pillar": "skills",
+    "cluster": "learnerships"
+  },
+  {
+    "title": "From Learnership to Permanent Job: How to Make the Transition in South Africa",
+    "pitch": "Practical advice for South African learners on converting a learnership into full-time employment and building a lasting career.",
+    "pillar": "skills",
+    "cluster": "learnerships"
+  },
+  {
+    "title": "The Skills Development Levy Explained: What South African Employers Pay and Why",
+    "pitch": "A simple explanation of the Skills Development Levy, who pays it, how it is calculated, and what it funds in South Africa.",
+    "pillar": "skills",
+    "cluster": "skills-development"
+  },
+  {
+    "title": "How to Claim Back Your Skills Development Levy Through a WSP and ATR",
+    "pitch": "A step-by-step guide for South African employers to recover a portion of their SDL by submitting a Workplace Skills Plan and Annual Training Report.",
+    "pillar": "skills",
+    "cluster": "skills-development"
+  },
+  {
+    "title": "What Is a SETA and How Does It Fund Training in South Africa?",
+    "pitch": "An introduction to South Africa's SETAs, the role they play in workforce training, and how employers and learners can access their funding.",
+    "pillar": "skills",
+    "cluster": "skills-development"
+  },
+  {
+    "title": "Understanding NQF Levels: A Guide to South African Qualifications",
+    "pitch": "A clear breakdown of the National Qualifications Framework levels and what they mean for learners and employers in South Africa.",
+    "pillar": "skills",
+    "cluster": "skills-development"
+  },
+  {
+    "title": "Reskilling and Upskilling: Building a Future-Ready Workforce in South Africa",
+    "pitch": "Why continuous reskilling and upskilling matters for South African organisations and how to build an effective internal skills strategy.",
+    "pillar": "skills",
+    "cluster": "skills-development"
   }
 ]

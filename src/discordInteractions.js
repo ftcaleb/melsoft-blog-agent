@@ -156,6 +156,19 @@ async function runGenerate(topicInput) {
     }
   }
 
+  // Persist the topic cluster for per-cluster performance reporting (Deliverable
+  // 6/7). Best-effort separate update so a missing `cluster` column only warns —
+  // it never fails the draft save. Populates automatically once the column exists.
+  if (post.cluster) {
+    const { error: clusterErr } = await supabase
+      .from('posts')
+      .update({ cluster: post.cluster })
+      .eq('id', data.id);
+    if (clusterErr) {
+      console.warn(`[discord] Could not persist cluster "${post.cluster}" (is the 'cluster' column added?): ${clusterErr.message}`);
+    }
+  }
+
   return { draftId: data.id, slug: data.slug, title: data.title, excerpt: post.metaDescription };
 }
 

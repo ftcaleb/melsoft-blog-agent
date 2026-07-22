@@ -283,6 +283,7 @@ export async function generateCandidates({ forceFresh = false } = {}) {
       title: topic.title,
       pitch: topic.pitch,
       pillar: topic.pillar,
+      cluster: topic.cluster, // carry the hand-tagged cluster through to the writer
       type: 'evergreen',
       sourceNotes: 'evergreen bank'
     }));

@@ -333,6 +333,21 @@ app.post('/api/approve', async (req, res) => {
     }
 
     console.log(`[API POST /api/approve] Draft successfully saved to Supabase (ID: ${data.id}, Slug: ${data.slug})`);
+
+    // Persist the topic cluster for per-cluster performance reporting (Deliverable
+    // 6/7). Done as a separate best-effort update so a missing `cluster` column
+    // (before the one-time ALTER TABLE is run) only warns — it never fails the
+    // draft save. Once the column exists this populates automatically.
+    if (post.cluster) {
+      const { error: clusterErr } = await supabase
+        .from('posts')
+        .update({ cluster: post.cluster })
+        .eq('id', data.id);
+      if (clusterErr) {
+        console.warn(`[API POST /api/approve] Could not persist cluster "${post.cluster}" (is the 'cluster' column added?): ${clusterErr.message}`);
+      }
+    }
+
     res.json({ success: true, draftId: data.id, slug: data.slug });
   } catch (error) {
     console.error('[API POST /api/approve] Error generating/logging post:', error);
