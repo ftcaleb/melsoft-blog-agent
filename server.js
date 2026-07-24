@@ -7,7 +7,7 @@ import { selectTopics } from './src/select.js';
 import { writePost } from './src/writer.js';
 import { supabase } from './src/supabaseClient.js';
 import { markdownToBlocks, computeReadTime } from './src/markdownToBlocks.js';
-import { registerDiscordRoutes } from './src/discordInteractions.js';
+import { registerDiscordRoutes, topicHash } from './src/discordInteractions.js';
 
 dotenv.config();
 
@@ -68,15 +68,16 @@ const DISCORD_CUSTOM_ID_MAX = 100; // hard limit on a component custom_id
 const DISCORD_BUTTONS_PER_ROW = 5; // max buttons in one action row
 const DISCORD_MAX_BUTTON_ROWS = 5; // max action rows in one message
 
-// Builds "Generate #N" button rows for the given topic candidates, matching the
-// numbering used in the notification's text list. Each button's custom_id is
-// `generate:<full title>` — the exact format the existing Discord interactions
-// handler (src/discordInteractions.js) parses and routes to runGenerate, the
-// same code path as the /generate slash command. A click therefore drafts that
-// topic with no extra wiring. Buttons are numbered (not title-labelled) so they
-// stay compact and never collide with Discord's 80-char label limit; a topic
-// whose custom_id would exceed the 100-char limit is skipped (it stays in the
-// text list and is still draftable via `/generate`).
+// Builds "Generate #N" button rows for the given topics, matching the numbering
+// used in the notification's text list. Each button's custom_id is
+// `generate:h:<hash>` — a SHORT reference the Discord interactions handler
+// resolves back to the exact topic before drafting it.
+//
+// Why a hash and not the title: Discord caps custom_id at 100 chars and titles
+// routinely run 90–120, so embedding the full title silently dropped almost
+// every button (only a title <= 91 chars survived). A hash is always ~19 chars,
+// so every button renders — and unlike an index it can never resolve to a
+// different topic if the topic list is refreshed before someone clicks.
 export function buildTopicButtons(candidates) {
   const rows = [];
   let current = null;
@@ -86,9 +87,9 @@ export function buildTopicButtons(candidates) {
     const title = String(candidates[i] && candidates[i].title || '').trim();
     if (!title) continue;
 
-    const customId = `generate:${title}`;
+    const customId = `generate:h:${topicHash(title)}`;
     if (customId.length > DISCORD_CUSTOM_ID_MAX) {
-      skipped.push(i + 1);
+      skipped.push(i + 1); // unreachable in practice; kept as a guard
       continue;
     }
 
@@ -206,19 +207,43 @@ app.get('/api/cron/refresh-topics', async (req, res) => {
     const candidates = await refreshResearchCache();
     console.log(`[cron] Research cache refreshed: ${candidates.length} candidates.`);
 
-    // Notify Discord that fresh topics were generated (non-fatal). Each listed
-    // topic also gets a "Generate #N" button (built from the SAME slice, so the
-    // numbering lines up) — clicking one drafts that topic via the existing
-    // Discord interactions handler. Buttons appear only where the webhook can
-    // render them; the text list is always sent as a fallback.
+    // Notify Discord with the SAME three topics the dashboard would show —
+    // selectTopics() applies the fixed 2 tech + 1 skills rule — rather than the
+    // raw candidate list. Each of the three gets a "Generate #N" button whose
+    // numbering matches the list. Non-fatal: any failure here is logged, and the
+    // cache refresh above still counts as a success.
     const appUrl = process.env.APP_URL || 'https://melsoft-blog.vercel.app';
-    const listed = candidates.slice(0, 10);
-    const list = listed.map((c, i) => `${i + 1}. ${c.title}`).join('\n');
-    const buttons = buildTopicButtons(listed);
-    const message = candidates.length
-      ? `🔔 **Fresh blog topics generated** — ${candidates.length} new candidate${candidates.length === 1 ? '' : 's'}\n\n👉 **Open the blog agent:** ${appUrl}\n\n${list}\n\n🖱️ Tap **Generate #N** below to draft that topic here in Discord.`
-      : `🔔 Topic research ran but found no recent candidates this time.\n\n👉 **Open the blog agent:** ${appUrl}`;
-    await notifyDiscord(message, candidates.length ? buttons : undefined);
+
+    let selected = [];
+    if (candidates.length) {
+      try {
+        // Re-read through generateCandidates so evergreen topics and the
+        // already-covered dedup are applied, exactly like GET /api/topics.
+        const pool = await generateCandidates({ forceFresh: false });
+        selected = selectTopics(pool);
+      } catch (selErr) {
+        // Not enough candidates in a pillar — fall back to a plain heads-up.
+        console.warn('[cron] Could not select 3 topics:', selErr.message);
+      }
+    }
+
+    let message;
+    let buttons;
+    if (selected.length) {
+      const list = selected
+        .map((t, i) => `${i + 1}. \`[${String(t.pillar || '?').toUpperCase()} | ${String(t.type || '?').toUpperCase()}]\` ${t.title}`)
+        .join('\n');
+      buttons = buildTopicButtons(selected);
+      message =
+        `🔔 **Fresh blog topics ready** — ${selected.length} selected for review\n\n` +
+        `👉 **Open the blog agent:** ${appUrl}\n\n${list}\n\n` +
+        `🖱️ Tap a button below to draft that topic here in Discord.`;
+    } else {
+      message =
+        `🔔 Topic research ran but no topics could be selected this time.\n\n` +
+        `👉 **Open the blog agent:** ${appUrl}`;
+    }
+    await notifyDiscord(message, buttons);
 
     return res.json({ ok: true, refreshedAt: new Date().toISOString(), count: candidates.length });
   } catch (err) {

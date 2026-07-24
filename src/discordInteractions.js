@@ -69,6 +69,36 @@ async function getSelectedTopics({ forceFresh = false } = {}) {
   return selectTopics(candidates);
 }
 
+// Short, stable reference for a topic, used inside a button's custom_id.
+//
+// Discord caps custom_id at 100 chars, and generated titles routinely run
+// 90–120, so the full title cannot be embedded (it silently dropped most
+// buttons). A hash keeps the id tiny (`generate:h:3f9a2c81`) AND — unlike an
+// index — can never resolve to a *different* topic: either the hash matches a
+// current candidate (exactly the topic the message showed) or it matches
+// nothing (the button has expired). FNV-1a over a normalised title.
+export function topicHash(title) {
+  const s = String(title || '').toLowerCase().replace(/[^a-z0-9]/g, '');
+  let h = 0x811c9dc5;
+  for (let i = 0; i < s.length; i++) {
+    h ^= s.charCodeAt(i);
+    h = Math.imul(h, 0x01000193) >>> 0;
+  }
+  return h.toString(16).padStart(8, '0');
+}
+
+// Resolves a generate-button payload into something runGenerate can use.
+//   "h:<hash>" -> the matching candidate object (carrying pillar/pitch/cluster),
+//                 or null when nothing matches (topics rotated / already written).
+//   anything else -> treated as a literal title, preserving older buttons that
+//                 still carry the full title in their custom_id.
+async function resolveTopicRef(payload) {
+  if (!/^h:[0-9a-f]{8}$/i.test(payload)) return payload; // legacy full-title button
+  const hash = payload.slice(2).toLowerCase();
+  const candidates = await generateCandidates({ forceFresh: false });
+  return candidates.find((c) => topicHash(c.title) === hash) || null;
+}
+
 function formatTopicsMessage(topics) {
   if (!Array.isArray(topics) || topics.length === 0) {
     return 'No trending topics are cached right now. Try again after the next scheduled research run.';
@@ -304,6 +334,27 @@ async function handlePublishDeferred(interaction, slug) {
   }
 }
 
+// Button path for generate: resolve the custom_id payload to a topic first, so a
+// stale button reports honestly instead of silently drafting the wrong topic.
+async function handleGenerateFromRef(interaction, payload) {
+  let topic;
+  try {
+    topic = await resolveTopicRef(payload);
+  } catch (err) {
+    console.warn('[discord] Topic reference lookup failed:', err.message);
+    await editOriginalResponse(interaction, `Could not look that topic up: ${err.message}`);
+    return;
+  }
+  if (topic === null) {
+    await editOriginalResponse(
+      interaction,
+      'Those topics have since been refreshed, so this button has expired. Run `/topics` for the current list.'
+    );
+    return;
+  }
+  await handleGenerateDeferred(interaction, topic);
+}
+
 async function handleTopicsDeferred(interaction) {
   try {
     const topics = await getSelectedTopics({ forceFresh: false });
@@ -424,7 +475,7 @@ export function registerDiscordRoutes(app) {
           }
           if (!payload) return ephemeral(res, 'This button is missing a topic.');
           defer(res, false); // public: visible to the whole channel
-          keepAlive(handleGenerateDeferred(interaction, payload));
+          keepAlive(handleGenerateFromRef(interaction, payload));
           return;
         }
 
