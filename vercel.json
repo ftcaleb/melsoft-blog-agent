@@ -9,6 +9,6 @@
     { "src": "/(.*)", "dest": "/api/index.js" }
   ],
   "crons": [
-    { "path": "/api/cron/refresh-topics", "schedule": "0 7 * * 2,5" }
+    { "path": "/api/cron/refresh-topics", "schedule": "0 7 * * 1-5" }
   ]
 }

@@ -51,6 +51,71 @@ function scoreCandidate(candidate) {
 }
 
 /**
+ * Weekly publishing plan: 5 posts a week — 3 skills development + 2 tech.
+ * This supersedes the brief's per-run "2 tech + 1 skills" split: instead of one
+ * mixed set, each weekday targets a single pillar and one post is published
+ * that day, so the WEEK lands on the 3:2 ratio.
+ *
+ * Keys are UTC weekday numbers (0 = Sunday ... 6 = Saturday). The cron fires at
+ * 07:00 UTC (09:00 SAST), so the UTC day matches the South African day.
+ * Weekends are intentionally absent — no publishing.
+ */
+export const PILLAR_SCHEDULE = {
+  1: 'skills', // Monday
+  2: 'tech',   // Tuesday
+  3: 'skills', // Wednesday
+  4: 'tech',   // Thursday
+  5: 'skills', // Friday
+};
+
+/**
+ * Returns the pillar scheduled for a given date, or null on a non-publishing
+ * day (weekend).
+ *
+ * @param {Date} [date] Defaults to now
+ * @returns {'tech'|'skills'|null}
+ */
+export function pillarForDate(date = new Date()) {
+  return PILLAR_SCHEDULE[date.getUTCDay()] || null;
+}
+
+/**
+ * Selects up to `count` topics from a SINGLE pillar — used for the daily run,
+ * where the weekday determines the pillar. Recent and evergreen are interleaved
+ * so a day's options are never all news reactions (brief Rule 1), falling back
+ * to whichever pool still has topics once the other is exhausted.
+ *
+ * @param {Array} candidates Candidate topic objects
+ * @param {'tech'|'skills'} pillar Target pillar for the day
+ * @param {number} [count] How many topics to offer (default 3)
+ * @returns {Array} Up to `count` topics, all from `pillar`
+ */
+export function selectTopicsForPillar(candidates, pillar, count = 3) {
+  if (!Array.isArray(candidates)) {
+    throw new Error('Candidates must be a valid array');
+  }
+  if (!pillar) {
+    throw new Error('A target pillar is required');
+  }
+
+  const scored = candidates
+    .filter(c => c.pillar === pillar)
+    .map(c => ({ ...c, _score: scoreCandidate(c) }));
+
+  const recent = scored.filter(c => c.type === 'recent').sort((a, b) => b._score - a._score);
+  const evergreen = scored.filter(c => c.type === 'evergreen').sort((a, b) => b._score - a._score);
+
+  const picked = [];
+  let r = 0, e = 0;
+  while (picked.length < count && (r < recent.length || e < evergreen.length)) {
+    if (r < recent.length) picked.push(recent[r++]);
+    if (picked.length < count && e < evergreen.length) picked.push(evergreen[e++]);
+  }
+
+  return picked.map(({ _score, ...rest }) => rest);
+}
+
+/**
  * Selects exactly 3 topics from candidates:
  * - Exactly 2 from "tech" pillar
  * - Exactly 1 from "skills" pillar

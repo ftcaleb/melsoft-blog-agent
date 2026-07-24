@@ -3,7 +3,7 @@ import dotenv from 'dotenv';
 import path from 'path';
 import { fileURLToPath } from 'url';
 import { generateCandidates, refreshResearchCache } from './src/research.js';
-import { selectTopics } from './src/select.js';
+import { selectTopics, selectTopicsForPillar, pillarForDate } from './src/select.js';
 import { writePost } from './src/writer.js';
 import { supabase } from './src/supabaseClient.js';
 import { markdownToBlocks, computeReadTime } from './src/markdownToBlocks.js';
@@ -214,33 +214,44 @@ app.get('/api/cron/refresh-topics', async (req, res) => {
     // cache refresh above still counts as a success.
     const appUrl = process.env.APP_URL || 'https://melsoft-blog.vercel.app';
 
+    // One post a day, 5 a week: the weekday decides the pillar (3 skills + 2
+    // tech per week). Off-schedule manual runs (weekends) fall back to skills,
+    // the majority pillar, so a manual trigger still produces useful options.
+    const now = new Date();
+    const scheduled = pillarForDate(now);
+    const targetPillar = scheduled || 'skills';
+    const dayName = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'][now.getUTCDay()];
+    const pillarLabel = targetPillar === 'skills' ? 'SKILLS DEVELOPMENT' : 'TECH';
+
     let selected = [];
     if (candidates.length) {
       try {
         // Re-read through generateCandidates so evergreen topics and the
         // already-covered dedup are applied, exactly like GET /api/topics.
         const pool = await generateCandidates({ forceFresh: false });
-        selected = selectTopics(pool);
+        selected = selectTopicsForPillar(pool, targetPillar, 3);
       } catch (selErr) {
-        // Not enough candidates in a pillar — fall back to a plain heads-up.
-        console.warn('[cron] Could not select 3 topics:', selErr.message);
+        console.warn(`[cron] Could not select ${targetPillar} topics:`, selErr.message);
       }
     }
+    console.log(`[cron] ${dayName} → ${targetPillar} day; offering ${selected.length} topic(s).`);
 
     let message;
     let buttons;
     if (selected.length) {
       const list = selected
-        .map((t, i) => `${i + 1}. \`[${String(t.pillar || '?').toUpperCase()} | ${String(t.type || '?').toUpperCase()}]\` ${t.title}`)
+        .map((t, i) => `${i + 1}. \`[${String(t.type || '?').toUpperCase()}]\` ${t.title}`)
         .join('\n');
       buttons = buildTopicButtons(selected);
       message =
-        `🔔 **Fresh blog topics ready** — ${selected.length} selected for review\n\n` +
+        `🔔 **${dayName} — ${pillarLabel} day**\n` +
+        `_Weekly plan: 3 skills development · 2 tech (one post per weekday)._\n\n` +
         `👉 **Open the blog agent:** ${appUrl}\n\n${list}\n\n` +
         `🖱️ Tap a button below to draft that topic here in Discord.`;
     } else {
       message =
-        `🔔 Topic research ran but no topics could be selected this time.\n\n` +
+        `🔔 **${dayName} — ${pillarLabel} day**\n\n` +
+        `Topic research ran but no ${targetPillar} topics were available today.\n\n` +
         `👉 **Open the blog agent:** ${appUrl}`;
     }
     await notifyDiscord(message, buttons);
@@ -272,13 +283,24 @@ app.get('/api/topics', async (req, res) => {
       return res.json(result);
     }
 
+    // Optional ?pillar=tech|skills targets a single pillar (the daily plan:
+    // 3 skills + 2 tech per week). Pass ?pillar=today to follow the weekday
+    // schedule. Omit it for the original mixed 2 tech + 1 skills set.
+    const pillarParam = String(req.query.pillar || '').toLowerCase();
+    const targetPillar =
+      pillarParam === 'today' ? (pillarForDate(new Date()) || 'skills')
+      : (pillarParam === 'tech' || pillarParam === 'skills') ? pillarParam
+      : null;
+
     topicsInFlight = (async () => {
       console.log(`[API GET /api/topics] Generating candidate topics${forceFresh ? ' (forceFresh — bypassing cache)' : ''}...`);
       const allCandidates = await generateCandidates({ forceFresh });
       console.log(`[API GET /api/topics] Total candidates generated: ${allCandidates.length}`);
 
-      console.log('[API GET /api/topics] Selecting top 3 topics...');
-      const selectedTopics = selectTopics(allCandidates);
+      console.log(`[API GET /api/topics] Selecting top 3 topics${targetPillar ? ` (${targetPillar} only)` : ''}...`);
+      const selectedTopics = targetPillar
+        ? selectTopicsForPillar(allCandidates, targetPillar, 3)
+        : selectTopics(allCandidates);
 
       console.log('[API GET /api/topics] Successfully selected 3 topics:');
       selectedTopics.forEach((t, i) => {
