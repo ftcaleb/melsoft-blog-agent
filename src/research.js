@@ -7,6 +7,7 @@ import { fileURLToPath } from 'url';
 import dotenv from 'dotenv';
 import { logAnthropicUsage } from './usage.js';
 import { supabase } from './supabaseClient.js';
+import { notifyFailure } from './notify.js';
 
 // Load environment variables
 dotenv.config();
@@ -73,12 +74,198 @@ function isFuzzyMatch(title1, title2) {
   return similarity > 0.85; // 85% similarity threshold
 }
 
+// ---------------------------------------------------------------------------
+// Response parsing.
+//
+// This file previously carried the same defect as the writer: it joined EVERY
+// text block with '' and then took the greedy `indexOf('[') .. lastIndexOf(']')`
+// span. With the server-side web_search tool the API runs multiple sampling
+// turns, each emitting its own text block, so a single request can return two
+// complete JSON arrays. Joined, they became `[...][...]`, which JSON.parse
+// rejects; jsonrepair then coerced them into an ARRAY OF ARRAYS whose every
+// element had `title === undefined`. Array.isArray() was true, so the poisoned
+// batch was returned, PERSISTED to the research_cache row, and served for a day:
+// Discord posted topics named "undefined" with buttons that resolved to nothing.
+// ---------------------------------------------------------------------------
+
+// Frozen module-level constant so the API's schema-compilation cache is hit.
+const CANDIDATES_JSON_SCHEMA = {
+  type: 'object',
+  properties: {
+    candidates: {
+      type: 'array',
+      items: {
+        type: 'object',
+        properties: {
+          title: { type: 'string' },
+          pitch: { type: 'string' },
+          pillar: { type: 'string', enum: ['tech', 'skills'] },
+          type: { type: 'string' },
+          sourceNotes: { type: 'string' },
+        },
+        required: ['title', 'pitch', 'pillar', 'type', 'sourceNotes'],
+        additionalProperties: false,
+      },
+    },
+  },
+  required: ['candidates'],
+  additionalProperties: false,
+};
+
+// Cleared if the API ever rejects output_config; the parser below is fully
+// capable without it, so this degrades rather than breaks.
+let structuredOutputSupported = true;
+
+/**
+ * Scans for balanced JSON object/array substrings, honouring string literals and
+ * escapes so brackets inside prose or inside a value never affect depth.
+ * Single pass, O(n).
+ *
+ * @param {string} raw
+ * @param {number} [limit=200] Cap; oldest candidates are dropped first
+ * @returns {string[]} Balanced substrings, ordered by closing bracket
+ */
+function extractJsonValues(raw, limit = 200) {
+  const found = [];
+  const stack = [];
+  const closerFor = { '{': '}', '[': ']' };
+  let inString = false;
+  let escaped = false;
+
+  for (let i = 0; i < raw.length; i++) {
+    const ch = raw[i];
+
+    if (inString) {
+      if (escaped) escaped = false;
+      else if (ch === '\\') escaped = true;
+      else if (ch === '"') inString = false;
+      continue;
+    }
+
+    if (ch === '"') {
+      inString = true;
+    } else if (ch === '{' || ch === '[') {
+      stack.push({ open: ch, index: i });
+    } else if ((ch === '}' || ch === ']') && stack.length) {
+      const top = stack.pop();
+      // Only record a genuinely matched pair. A mismatch means malformed input;
+      // popping without recording keeps the stack from wedging.
+      if (closerFor[top.open] === ch) {
+        found.push(raw.slice(top.index, i + 1));
+        // Keep the most recent candidates — the model's final list is last.
+        if (found.length > limit) found.shift();
+      }
+    }
+  }
+
+  return found;
+}
+
+/**
+ * Normalizes one raw candidate, or returns null if it is unusable.
+ * Forgiving where it safely can be (case, missing optional prose) and strict on
+ * the two fields the pipeline genuinely depends on: a real title and a pillar
+ * that select.js can route.
+ *
+ * @param {*} value
+ * @returns {object|null}
+ */
+function normalizeCandidate(value) {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return null;
+
+  const title = typeof value.title === 'string' ? value.title.trim() : '';
+  if (title.length < 8) return null;
+
+  const pillar = String(value.pillar || '').trim().toLowerCase();
+  if (pillar !== 'tech' && pillar !== 'skills') return null;
+
+  return {
+    title,
+    pitch: typeof value.pitch === 'string' ? value.pitch.trim() : '',
+    pillar,
+    type: typeof value.type === 'string' && value.type.trim() ? value.type.trim() : 'recent',
+    sourceNotes: typeof value.sourceNotes === 'string' ? value.sourceNotes.trim() : '',
+  };
+}
+
+/**
+ * Extracts the candidate list from a parsed value, accepting either the
+ * `{ candidates: [...] }` envelope or a bare `[...]` array (the legacy shape, and
+ * what an unconstrained fallback response still produces).
+ *
+ * @param {*} parsed
+ * @returns {object[]} Valid, normalized candidates (possibly empty)
+ */
+function normalizeCandidateList(parsed) {
+  let list = null;
+  if (Array.isArray(parsed)) list = parsed;
+  else if (parsed && typeof parsed === 'object' && Array.isArray(parsed.candidates)) list = parsed.candidates;
+  if (!list) return [];
+
+  // Flatten one level: this is exactly the array-of-arrays jsonrepair produces
+  // from two concatenated lists, so flattening recovers real candidates instead
+  // of discarding the whole batch.
+  const flat = list.some(Array.isArray) ? list.flat() : list;
+
+  return flat.map(normalizeCandidate).filter(Boolean);
+}
+
+/**
+ * Selects the candidate list from an Anthropic response's content blocks.
+ *
+ * Blocks are tried individually, newest first (with server tools the final turn
+ * holds the model's final answer), before the concatenation is scanned as a
+ * fallback for a list split across block boundaries. Strategies escalate from
+ * JSON.parse to jsonrepair, and every result must yield at least one valid
+ * candidate to be accepted.
+ *
+ * @param {object[]} content response.content
+ * @returns {object[]} Valid, normalized candidates (empty if none found)
+ */
+export function parseCandidatesResponse(content) {
+  const textBlocks = (Array.isArray(content) ? content : [])
+    .filter((block) => block && block.type === 'text' && typeof block.text === 'string')
+    .map((block) => block.text.replace(/<\/?cite\b[^>]*>/gi, '').trim())
+    .filter(Boolean);
+
+  if (!textBlocks.length) return [];
+
+  const strategies = [
+    (candidate) => JSON.parse(candidate),
+    (candidate) => JSON.parse(jsonrepair(candidate)),
+  ];
+
+  const scan = (text) => {
+    const values = extractJsonValues(text);
+    for (const run of strategies) {
+      for (let i = values.length - 1; i >= 0; i--) {
+        let parsed;
+        try {
+          parsed = run(values[i]);
+        } catch {
+          continue;
+        }
+        const list = normalizeCandidateList(parsed);
+        if (list.length) return list;
+      }
+    }
+    return [];
+  };
+
+  for (let i = textBlocks.length - 1; i >= 0; i--) {
+    const list = scan(textBlocks[i]);
+    if (list.length) return list;
+  }
+
+  return scan(textBlocks.join(''));
+}
+
 /**
  * Performs the live, billable web_search call to Anthropic to fetch recent
  * trending candidate topics. This is the expensive operation the cache exists
  * to avoid. Throws on a hard API/parse failure so callers don't cache garbage.
  *
- * @returns {Promise<Array>} Array of recent candidate topic objects (possibly empty)
+ * @returns {Promise<Array>} Array of recent candidate topic objects (non-empty)
  */
 export async function fetchRecentCandidates() {
   const apiKey = process.env.ANTHROPIC_API_KEY;
@@ -123,9 +310,9 @@ ${excludedTitles.map(t => `    - ${t}`).join('\n')}
 ${excludedSection}
     CRITICAL REQUIREMENTS:
     1. Every candidate must have BOTH a South African angle and an educational "what it means / what to do" angle (practical value/insights for learners, companies, or the local community), not just reporting "what happened".
-    2. Return ONLY a valid JSON array of candidate objects.
-    3. Do NOT include markdown code fences (like \`\`\`json), preamble, explanations, or postscript.
-    4. The array must contain objects matching this exact shape:
+    2. Return ONLY a single valid JSON object with a "candidates" array.
+    3. Do NOT include markdown code fences (like \`\`\`json), preamble, explanations, postscript, self-review, or revised versions of the list. Return the list once.
+    4. Each entry in "candidates" must match this exact shape:
     {
       "title": "string",
       "pitch": "string (one-line description of the angle)",
@@ -135,46 +322,53 @@ ${excludedSection}
     }
   `;
 
-  const response = await anthropic.messages.create({
+  const baseParams = {
     model: 'claude-haiku-4-5-20251001',
     max_tokens: 4000,
     tools: [{ type: 'web_search_20250305', name: 'web_search', max_uses: 3 }],
     messages: [
       { role: 'user', content: promptText }
     ]
-  });
+  };
+
+  let response;
+  if (!structuredOutputSupported) {
+    response = await anthropic.messages.create(baseParams);
+  } else {
+    try {
+      response = await anthropic.messages.create({
+        ...baseParams,
+        // Grammar-constrains decoding, so the model cannot emit commentary or a
+        // second revised list alongside the candidates. Verified against the live
+        // API to work alongside the server-side web_search tool on this model.
+        output_config: { format: { type: 'json_schema', schema: CANDIDATES_JSON_SCHEMA } },
+      });
+    } catch (err) {
+      const rejectedSchema =
+        err && err.status === 400 &&
+        /output_config|json_schema|output_format/i.test(String(err.message || ''));
+      if (!rejectedSchema) throw err;
+      console.warn('[research] API rejected output_config — falling back to unconstrained output for this process.');
+      structuredOutputSupported = false;
+      response = await anthropic.messages.create(baseParams);
+    }
+  }
 
   logAnthropicUsage('research', response);
 
-  let responseText = response.content
-    .filter(block => block.type === 'text')
-    .map(block => block.text)
-    .join('')
-    .trim();
+  const recentCandidates = parseCandidatesResponse(response.content);
 
-  // Defensively strip code fences if present
-  if (responseText.startsWith('```')) {
-    responseText = responseText.replace(/^```(?:json)?\n?/i, '').replace(/\n?```$/i, '').trim();
+  if (!recentCandidates.length) {
+    // Throw rather than return [] so callers never cache an empty batch over a
+    // good one. fetchRecentCandidates()'s contract already documents this.
+    throw new Error(
+      '[research] No valid candidates found in the response ' +
+      `(stop_reason=${response.stop_reason}, blocks=${(response.content || []).map(b => b && b.type).join(', ')})`
+    );
   }
 
-  // Extract JSON array substring to strip any conversational preamble
-  // (e.g. "I'll search for...") that the model emits alongside web_search tool use
-  const firstBracket = responseText.indexOf('[');
-  const lastBracket = responseText.lastIndexOf(']');
-  if (firstBracket !== -1 && lastBracket !== -1) {
-    responseText = responseText.substring(firstBracket, lastBracket + 1);
-  }
-
-  let recentCandidates;
-  try {
-    recentCandidates = JSON.parse(responseText);
-  } catch (parseErr) {
-    console.warn('[research] Standard JSON.parse failed. Attempting repair with jsonrepair...');
-    recentCandidates = JSON.parse(jsonrepair(responseText));
-    console.log('[research] JSON repaired and parsed successfully!');
-  }
-
-  return Array.isArray(recentCandidates) ? recentCandidates : [];
+  console.log(`[research] Parsed ${recentCandidates.length} valid candidate(s).`);
+  return recentCandidates;
 }
 
 /**
@@ -252,7 +446,20 @@ export async function getRecentCandidatesCached({ forceFresh = false } = {}) {
     // Live regeneration failed — fall back to whatever cache we have rather than
     // silently dropping all recent topics.
     console.error('[research] Live regeneration FAILED:', regenErr.message);
-    if (cache && Array.isArray(cache.candidates)) {
+
+    // Raise a visible alert: a regeneration failure is otherwise console-only,
+    // and the stale-cache fallback below makes it invisible in the UI too.
+    // Non-blocking — the fallback must happen regardless.
+    const fellBackToCache = !!(cache && Array.isArray(cache.candidates));
+    await notifyFailure(
+      'Topic research',
+      fellBackToCache
+        ? 'Live regeneration failed; serving the previous cached topics. The cache was NOT overwritten.'
+        : 'Live regeneration failed and no cache was available — no recent topics this run.',
+      [regenErr.message]
+    );
+
+    if (fellBackToCache) {
       console.warn('[research] Falling back to cached candidates.');
       return cache.candidates;
     }

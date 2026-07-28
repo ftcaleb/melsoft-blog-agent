@@ -8,7 +8,8 @@
     "node": ">=18"
   },
   "scripts": {
-    "start": "node server.js"
+    "start": "node server.js",
+    "test": "node scripts/testWriterParsing.js && node scripts/testResearchParsing.js"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.24.3",

@@ -1661,7 +1661,7 @@
       try {
         const { data, error } = await supabaseClient
           .from('posts')
-          .select('id, title, excerpt, created_at, published_at, status, tint, slug')
+          .select('id, title, excerpt, created_at, published_at, status, tint, slug, read_time')
           .eq('status', status)
           .order(isPublished ? 'published_at' : 'created_at', { ascending: false });
 
@@ -1688,6 +1688,19 @@
           else if (rawTint.includes('mint')) tintClass = 'tint-mint-preview';
           else if (rawTint.includes('lilac')) tintClass = 'tint-lilac-preview';
 
+          // Surface read time on the card. The list view never showed the body,
+          // so an over-long post (duplicated drafts, leaked model commentary)
+          // looked identical to a good one here. Posts target 500-800 words —
+          // about 3-4 minutes — so anything past 6 gets flagged for review
+          // before someone hits Publish.
+          const readMins = parseInt(post.read_time, 10);
+          const readOutOfRange = Number.isFinite(readMins) && readMins > 6;
+          const readMeta = post.read_time
+            ? `<span class="draft-card-date"${readOutOfRange
+                ? ' style="color: #ff8f6b;" title="Unusually long for a 500-800 word post — open and check the body before publishing."'
+                : ''}>${escapeHTML(post.read_time)}${readOutOfRange ? ' &#9888;' : ''}</span>`
+            : '';
+
           const viewLive = (isPublished && post.slug)
             ? `<a href="${livePostUrl(post.slug)}" target="_blank" rel="noopener" class="btn btn-secondary btn-sm">View live</a>`
             : '';
@@ -1704,6 +1717,7 @@
             <div class="card-preview-bar ${tintClass}"></div>
             <div class="draft-card-header">
               <span class="draft-card-date">${dateStr}</span>
+              ${readMeta}
             </div>
             <h3 class="draft-card-title">${escapeHTML(post.title || 'Untitled Post')}</h3>
             <p class="draft-card-excerpt">${escapeHTML(post.excerpt || 'No excerpt summary provided.')}</p>

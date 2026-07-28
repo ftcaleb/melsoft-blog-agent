@@ -4,10 +4,16 @@ import path from 'path';
 import { fileURLToPath } from 'url';
 import { generateCandidates, refreshResearchCache } from './src/research.js';
 import { selectTopics, selectTopicsForPillar, pillarForDate } from './src/select.js';
-import { writePost } from './src/writer.js';
+import { writePost, PostValidationError } from './src/writer.js';
 import { supabase } from './src/supabaseClient.js';
 import { markdownToBlocks, computeReadTime } from './src/markdownToBlocks.js';
 import { registerDiscordRoutes, topicHash } from './src/discordInteractions.js';
+import { notifyDiscord, notifyFailure } from './src/notify.js';
+
+// Re-exported for backwards compatibility: scripts/testDiscordNotify.js imports
+// notifyDiscord from here. The implementation now lives in src/notify.js so
+// modules that server.js imports can alert without a circular dependency.
+export { notifyDiscord };
 
 dotenv.config();
 
@@ -113,84 +119,6 @@ export function buildTopicButtons(candidates) {
   return rows;
 }
 
-// Sends a Discord notification. Awaited (so it finishes before a serverless
-// function returns) but non-fatal: everything is logged, never thrown.
-//
-// Two delivery paths, chosen automatically:
-//   1. BOT-TOKEN channel message — used when interactive `components` (buttons)
-//      are present AND both DISCORD_CHANNEL_ID and DISCORD_BOT_TOKEN are set.
-//      Components render natively on bot-sent messages (no ?with_components=true
-//      and no special flag). A plain channel webhook is NOT application-owned
-//      and cannot render interactive buttons, so this is the only path that can.
-//   2. WEBHOOK (DISCORD_WEBHOOK_URL) — the original behaviour, used when there
-//      are no components, or when the bot path is unconfigured or fails. When
-//      components are absent this is byte-for-byte the original plain-text post.
-//
-// The bot token is used only as an Authorization header — never logged, printed,
-// or included in any error message.
-export async function notifyDiscord(content, components) {
-  // Discord caps message content at 2000 chars.
-  const contentStr = String(content).slice(0, 1990);
-  const hasComponents = Array.isArray(components) && components.length > 0;
-
-  const botToken = process.env.DISCORD_BOT_TOKEN;
-  const channelId = process.env.DISCORD_CHANNEL_ID;
-
-  // Path 1: bot-token channel message (only when we have buttons to render and
-  // the bot is configured). On success we're done; on failure we fall through
-  // to the webhook path so a notification is never lost.
-  if (hasComponents && botToken && channelId) {
-    try {
-      const resp = await fetch(`https://discord.com/api/v10/channels/${channelId}/messages`, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          Authorization: `Bot ${botToken}`,
-        },
-        body: JSON.stringify({ content: contentStr, components }),
-      });
-      if (resp.ok) return;
-      // Log status only — never the token or headers.
-      console.warn(`[discord] Bot channel message responded ${resp.status}; falling back to webhook.`);
-    } catch (err) {
-      console.warn('[discord] Bot channel message failed:', err.message);
-    }
-  }
-
-  // Path 2: webhook fallback (original behaviour). Skipped silently if no URL.
-  const url = process.env.DISCORD_WEBHOOK_URL;
-  if (!url) return;
-
-  const base = { content: contentStr };
-
-  const send = (payload, withComponents) => {
-    const endpoint = withComponents
-      ? url + (url.includes('?') ? '&' : '?') + 'with_components=true'
-      : url;
-    return fetch(endpoint, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(payload),
-    });
-  };
-
-  try {
-    let resp;
-    if (hasComponents) {
-      resp = await send({ ...base, components }, true);
-      if (!resp.ok) {
-        console.warn(`[discord] Webhook with components responded ${resp.status}; retrying as plain text.`);
-        resp = await send(base, false);
-      }
-    } else {
-      resp = await send(base, false);
-    }
-    if (!resp.ok) console.warn(`[discord] Webhook responded ${resp.status}`);
-  } catch (err) {
-    console.warn('[discord] Notification failed:', err.message);
-  }
-}
-
 // Scheduled research-cache refresh (Vercel cron). Authenticated by CRON_SECRET,
 // which Vercel injects as "Authorization: Bearer <CRON_SECRET>" on cron
 // requests — NOT the Supabase session — so it is registered BEFORE the
@@ -259,6 +187,15 @@ app.get('/api/cron/refresh-topics', async (req, res) => {
     return res.json({ ok: true, refreshedAt: new Date().toISOString(), count: candidates.length });
   } catch (err) {
     console.error('[cron] Refresh failed:', err);
+    // The cron calls refreshResearchCache() directly, so a failure here bypasses
+    // the stale-cache fallback (and its alert) in getRecentCandidatesCached().
+    // Without this, an unattended cron failure would be a silent 500 — exactly
+    // the blind spot that let the original incident reach the live site.
+    await notifyFailure(
+      'Scheduled topic research',
+      'The cron refresh failed. The existing cached topics were NOT overwritten.',
+      [err.message]
+    );
     return res.status(500).json({ error: 'Refresh failed', details: err.message });
   }
 });
@@ -397,6 +334,25 @@ app.post('/api/approve', async (req, res) => {
 
     res.json({ success: true, draftId: data.id, slug: data.slug });
   } catch (error) {
+    // A draft rejected by the writer's content gate never reached Supabase.
+    // Report it distinctly from a genuine save failure so the cause is obvious
+    // in the logs instead of being buried under "Failed to save draft".
+    if (error instanceof PostValidationError) {
+      console.error('[API POST /api/approve] Draft REJECTED by the content gate — nothing was saved. Reasons:', error.reasons);
+      // Raise a visible alert. A console-only rejection is invisible on
+      // serverless, which is why the original incident was found by reading the
+      // live site rather than from a notification.
+      await notifyFailure(
+        'Draft generation',
+        `Topic: ${req.body && req.body.topic && req.body.topic.title ? req.body.topic.title : 'unknown'}`,
+        error.reasons
+      );
+      return res.status(422).json({
+        error: 'The generated draft failed the content quality gate and was not saved',
+        details: error.message,
+        reasons: error.reasons
+      });
+    }
     console.error('[API POST /api/approve] Error generating/logging post:', error);
     res.status(500).json({ error: 'Failed to save draft', details: error.message });
   }
