@@ -842,6 +842,31 @@
       left: 0;
     }
 
+    /* Featured-image thumbnail on a list card, shown instead of the tint bar
+       when the post has an image (.card-preview-bar still handles the rest).
+
+       Deliberately NOT absolutely positioned like the bar: at 16:9 it would
+       overlap the card text. The negative margins cancel .draft-card's padding
+       so it bleeds flush to the card edges and pushes the content down, which
+       needs no change to .draft-card itself. Keep these in step with that
+       rule's `padding: 1.6rem 1.5rem 1.4rem`.
+
+       16:9 matches what the generator targets; object-fit: cover keeps older
+       images (1.60-1.79) undistorted. */
+    .draft-card-thumb {
+      margin: -1.6rem -1.5rem 1.1rem;
+      aspect-ratio: 16 / 9;
+      overflow: hidden;
+      border-radius: var(--radius-md) var(--radius-md) 0 0;
+      background: var(--tint-sky);
+    }
+    .draft-card-thumb img {
+      width: 100%;
+      height: 100%;
+      object-fit: cover;
+      display: block;
+    }
+
     /* Apply tints dynamically */
     .tint-sky-preview { background-color: var(--tint-sky); }
     .tint-peach-preview { background-color: var(--tint-peach); }
@@ -1423,6 +1448,16 @@
             <div class="image-preview-container" id="image-preview-container">
               <img id="image-preview-img" src="" alt="Feature preview">
             </div>
+
+            <!-- Regenerates the hero with AI. Drafts only (the server refuses
+                 published posts), so a live post's image can never be swapped
+                 out without review. -->
+            <div style="margin-top: 0.75rem; display: flex; align-items: center; gap: 0.75rem;">
+              <button type="button" id="generate-image-btn" class="btn btn-secondary btn-sm" onclick="regenerateFeaturedImage(event)">
+                Generate with AI
+              </button>
+              <span id="generate-image-status" style="display: none; color: var(--text-secondary); font-size: 0.8125rem;"></span>
+            </div>
           </div>
 
           <!-- Bottom form actions -->
@@ -1479,6 +1514,14 @@
     let currentDraftId = null;
     let currentDraftBodyBlocks = [];
     let currentUploadedImageUrl = '';
+    // True only once the image has been CHANGED in this editing session (manual
+    // upload or AI generation). Save/Publish write `image` only when this is set.
+    //
+    // Without it both actions wrote back the URL captured when the draft was
+    // OPENED — so if the image changed elsewhere meanwhile (Discord's Regenerate
+    // button, or a second tab), hitting Save silently reverted it. Two surfaces
+    // can now both change the image, so this stopped being theoretical.
+    let imageDirty = false;
     let currentTab = 'draft'; // 'draft' | 'published' | 'topics' — active list tab
     let trendingTopics = [];  // candidate topics currently shown on the Topics tab
     let isGenerating = false; // guard: a post generation is in flight
@@ -1661,7 +1704,7 @@
       try {
         const { data, error } = await supabaseClient
           .from('posts')
-          .select('id, title, excerpt, created_at, published_at, status, tint, slug, read_time')
+          .select('id, title, excerpt, created_at, published_at, status, tint, slug, read_time, image')
           .eq('status', status)
           .order(isPublished ? 'published_at' : 'created_at', { ascending: false });
 
@@ -1711,10 +1754,18 @@
             : `<button type="button" class="btn btn-secondary btn-sm" onclick="openDraft(event, '${post.id}')">Open / Review</button>
                <button type="button" class="btn btn-danger btn-sm" onclick="deletePost(event, '${post.id}')">Delete</button>`;
 
+          // Show the hero on the card. Images are generated automatically now,
+          // so without this you could publish a post having never seen its
+          // image — the list was the one place a bad one would be obvious at a
+          // glance. Falls back to the tint bar when there is no image.
+          const cardVisual = post.image
+            ? `<div class="draft-card-thumb"><img src="${escapeHTML(post.image)}" alt="" loading="lazy"></div>`
+            : `<div class="card-preview-bar ${tintClass}"></div>`;
+
           const card = document.createElement('div');
           card.className = 'draft-card';
           card.innerHTML = `
-            <div class="card-preview-bar ${tintClass}"></div>
+            ${cardVisual}
             <div class="draft-card-header">
               <span class="draft-card-date">${dateStr}</span>
               ${readMeta}
@@ -1882,6 +1933,7 @@
         // Set state properties
         currentDraftBodyBlocks = data.body || [];
         currentUploadedImageUrl = data.image || '';
+        imageDirty = false; // freshly loaded from the database — nothing to write back
 
         // Fill form fields
         document.getElementById('edit-title').value = data.title || '';
@@ -1932,6 +1984,7 @@
       currentDraftId = null;
       currentDraftBodyBlocks = [];
       currentUploadedImageUrl = '';
+      imageDirty = false;
       showView('list-view');
       switchTab(null, currentTab);
     }
@@ -2070,6 +2123,7 @@
         }
 
         currentUploadedImageUrl = urlData.publicUrl;
+        imageDirty = true; // user-chosen image — Save/Publish must persist it
         console.log(`[Storage Upload] Success. URL: ${currentUploadedImageUrl}`);
 
         // Update previews
@@ -2084,6 +2138,61 @@
         uploaderArea.style.display = 'flex';
       } finally {
         uploaderProgress.style.display = 'none';
+      }
+    }
+
+    // ----------------------------------------------------
+    // AI Featured Image Generation
+    // ----------------------------------------------------
+    // Regenerates the hero via POST /api/image. Drafts only — the server
+    // refuses published posts, so a live page's image can never change without
+    // review. The new URL is persisted server-side, and mirrored into
+    // currentUploadedImageUrl here so a subsequent Save or Publish (both of
+    // which write that variable) cannot blank it out.
+    async function regenerateFeaturedImage(e) {
+      if (e) e.preventDefault();
+      if (!supabaseClient || !currentDraftId) return;
+
+      const btn = document.getElementById('generate-image-btn');
+      const statusEl = document.getElementById('generate-image-status');
+      const previewContainer = document.getElementById('image-preview-container');
+      const previewImg = document.getElementById('image-preview-img');
+      const placeholder = document.getElementById('upload-placeholder');
+
+      if (currentUploadedImageUrl && !confirm('Replace the current featured image with a newly generated one?')) {
+        return;
+      }
+
+      try {
+        btn.disabled = true;
+        btn.innerHTML = '<div class="spinner"></div> Generating...';
+        statusEl.textContent = 'This can take up to two minutes.';
+        statusEl.style.display = 'inline';
+
+        const resp = await fetch('/api/image', {
+          method: 'POST',
+          headers: await authHeaders({ 'Content-Type': 'application/json' }),
+          body: JSON.stringify({ draftId: currentDraftId })
+        });
+
+        if (resp.status === 401) { showStatus('Your session expired — please sign in again.', 'error'); return; }
+        const result = await resp.json().catch(() => ({}));
+        if (!resp.ok) throw new Error(result.error || 'Image generation failed');
+
+        currentUploadedImageUrl = result.image;
+        imageDirty = true; // already persisted server-side; writing it back is a no-op
+        previewImg.src = currentUploadedImageUrl;
+        previewContainer.style.display = 'block';
+        placeholder.style.display = 'none';
+
+        updateLivePreview();
+        showStatus('New featured image generated.', 'success');
+      } catch (err) {
+        showStatus('Image generation failed: ' + err.message, 'error');
+      } finally {
+        btn.disabled = false;
+        btn.innerHTML = 'Generate with AI';
+        statusEl.style.display = 'none';
       }
     }
 
@@ -2115,9 +2224,12 @@
           post_date: postDate,
           author,
           author_role: authorRole,
-          tint,
-          image: currentUploadedImageUrl
+          tint
         };
+        // Only written when changed in this session. Otherwise the field is left
+        // alone, so a save cannot clobber an image set elsewhere (Discord's
+        // Regenerate, or another tab) since this draft was opened.
+        if (imageDirty) updateData.image = currentUploadedImageUrl;
 
         const { data, error } = await supabaseClient
           .from('posts')
@@ -2166,6 +2278,24 @@
 
       // A published post with no feature image renders a plain colour block on
       // the website blog card, so make that explicit before going live.
+      //
+      // Re-read from the database first when nothing was changed here: the image
+      // may have been generated or regenerated from Discord since this draft was
+      // opened, and warning about a missing image that actually exists (or worse,
+      // staying silent about one that doesn't) would both be wrong.
+      if (!imageDirty) {
+        try {
+          const { data: fresh } = await supabaseClient
+            .from('posts')
+            .select('image')
+            .eq('id', currentDraftId)
+            .single();
+          if (fresh) currentUploadedImageUrl = fresh.image || '';
+        } catch (err) {
+          console.warn('Could not refresh the image before publishing:', err.message);
+        }
+      }
+
       if (!currentUploadedImageUrl) {
         if (!confirm("No feature image uploaded — the post card will show a plain colour block instead. Publish anyway?")) {
           return;
@@ -2185,6 +2315,9 @@
         // Single atomic update: save the eight editable fields AND flip the
         // post live. The logged-in session's "authed full access" RLS policy
         // permits this; the website reads published posts straight from Supabase.
+        // `image` is included unconditionally here, but it has just been
+        // reconciled against the database above, so it is the current value
+        // either way — never the stale one captured at open time.
         const { error } = await supabaseClient
           .from('posts')
           .update({

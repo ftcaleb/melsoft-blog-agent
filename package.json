@@ -9,7 +9,7 @@
   },
   "scripts": {
     "start": "node server.js",
-    "test": "node scripts/testWriterParsing.js && node scripts/testResearchParsing.js"
+    "test": "node scripts/testWriterParsing.js && node scripts/testResearchParsing.js && node scripts/testImageGen.js"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.24.3",

@@ -41,6 +41,35 @@ const POST_JSON_SCHEMA = {
 // breaks. Never flipped back within a process — one probe per boot is enough.
 let structuredOutputSupported = true;
 
+const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+
+/**
+ * Retries a single Anthropic call on transient server-side failures (5xx, or
+ * connection-level errors with no status at all) with short exponential
+ * backoff. The SDK already retries a couple of times internally before
+ * throwing; this is a second, coarser layer for when those are exhausted —
+ * the kind of failure that otherwise surfaces as a raw
+ * "500 Internal server error" straight through to the user. Never retries a
+ * 4xx: that means our request is wrong, not a transient blip, and retrying
+ * it would just waste time before failing the same way anyway.
+ */
+async function callAnthropicWithRetry(fn, { attempts = 3, baseDelayMs = 1000 } = {}) {
+  let lastErr;
+  for (let i = 1; i <= attempts; i++) {
+    try {
+      return await fn();
+    } catch (err) {
+      lastErr = err;
+      const retryable = !err.status || err.status >= 500;
+      if (!retryable || i === attempts) throw err;
+      const delay = baseDelayMs * 2 ** (i - 1);
+      console.warn(`[writer] Anthropic API error (attempt ${i}/${attempts}, status ${err.status || 'n/a'}): ${err.message}. Retrying in ${delay}ms...`);
+      await sleep(delay);
+    }
+  }
+  throw lastErr;
+}
+
 /**
  * Programmatically derives a URL-safe slug from a title string.
  *
@@ -55,6 +84,31 @@ export function generateSlug(title) {
     .replace(/[^\w\s-]/g, '')     // Remove non-word, non-space, non-hyphen characters
     .replace(/[\s_]+/g, '-')      // Replace spaces and underscores with hyphens
     .replace(/-+/g, '-');         // Remove consecutive duplicate hyphens
+}
+
+/**
+ * Formats a post's human-readable display date (`posts.post_date`).
+ *
+ * Matches the convention on the recent published posts — "Aug 11, 2026" — with a
+ * zero-padded day, so generated drafts are indistinguishable from the ones typed
+ * by hand. Older posts drift to a different shape ("29 July"); generating this
+ * rather than typing it is what stops that drift recurring.
+ *
+ * Rendered in Africa/Johannesburg deliberately: the blog is South African and
+ * the scheduled run fires at 09:00 SAST, but the server is UTC. Without the
+ * explicit zone, anything generated after 22:00 SAST would be stamped with the
+ * PREVIOUS day's date.
+ *
+ * @param {Date} [date] Defaults to now
+ * @returns {string} e.g. "Aug 18, 2026"
+ */
+export function formatPostDate(date = new Date()) {
+  return date.toLocaleDateString('en-US', {
+    timeZone: 'Africa/Johannesburg',
+    month: 'short',
+    day: '2-digit',
+    year: 'numeric',
+  });
 }
 
 /**
@@ -530,32 +584,52 @@ export async function writePost(topic) {
     };
 
     if (!structuredOutputSupported) {
-      return anthropic.messages.create(baseParams);
+      return callAnthropicWithRetry(() => anthropic.messages.create(baseParams));
     }
 
     try {
-      return await anthropic.messages.create({
+      return await callAnthropicWithRetry(() => anthropic.messages.create({
         ...baseParams,
         // Grammar-constrains decoding to POST_JSON_SCHEMA, so the model cannot
         // emit commentary or extra drafts alongside the article. Verified
         // against the live API to work alongside the server-side web_search tool
         // on this model.
         output_config: { format: { type: 'json_schema', schema: POST_JSON_SCHEMA } },
-      });
+      }));
     } catch (err) {
       const rejectedSchema =
         err && err.status === 400 &&
         /output_config|json_schema|output_format/i.test(String(err.message || ''));
-      if (!rejectedSchema) throw err;
 
-      console.warn('[writer] API rejected output_config — falling back to unconstrained output for this process.');
-      structuredOutputSupported = false;
-      return anthropic.messages.create(baseParams);
+      // Retries above are already exhausted here, so a 5xx/connection error
+      // reaching this point means the structured (schema + web_search)
+      // request kept failing server-side. Fall back to the unconstrained
+      // request once, in case that combination is what's tripping it — this
+      // does NOT flip structuredOutputSupported, since it may just be this
+      // topic/run rather than a lasting API change.
+      const persistentServerError = err && (!err.status || err.status >= 500);
+
+      if (!rejectedSchema && !persistentServerError) throw err;
+
+      if (rejectedSchema) {
+        console.warn('[writer] API rejected output_config — falling back to unconstrained output for this process.');
+        structuredOutputSupported = false;
+      } else {
+        console.warn('[writer] Structured request kept failing with a server-side error — retrying once without output_config in case that combination is the trigger.');
+      }
+      return callAnthropicWithRetry(() => anthropic.messages.create(baseParams));
     }
   };
 
   for (let attempt = 1; attempt <= MAX_ATTEMPTS; attempt++) {
-    const response = await requestPost();
+    let response;
+    try {
+      response = await requestPost();
+    } catch (err) {
+      lastError = err;
+      console.error(`[writer] Attempt ${attempt}/${MAX_ATTEMPTS}: Anthropic API call failed — ${err.message}`);
+      continue;
+    }
 
     logAnthropicUsage('writer', response);
 

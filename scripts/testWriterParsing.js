@@ -6,7 +6,7 @@
 // Each case pins a real failure mode observed in production or measured against
 // the live API while diagnosing the published-commentary incident.
 
-import { parseWriterResponse, validatePost, PostValidationError, generateSlug } from '../src/writer.js';
+import { parseWriterResponse, validatePost, PostValidationError, generateSlug, formatPostDate } from '../src/writer.js';
 
 let passed = 0;
 let failed = 0;
@@ -233,6 +233,29 @@ check('generateSlug is unchanged', () => {
 
 check('a legitimate 800-word post at the target ceiling passes', () => {
   validatePost({ ...goodPost(), bodyMarkdown: `## Heading\n\n${words(800, 'legit')}` });
+});
+
+check('formatPostDate matches the published-post convention', () => {
+  // "Aug 11, 2026" — zero-padded day, short month, full year. Pinned because a
+  // drift here is invisible until it reaches the live site, and the older posts
+  // show exactly that drift ("29 July") from the era when it was typed by hand.
+  assert(
+    formatPostDate(new Date('2026-08-11T09:00:00Z')) === 'Aug 11, 2026',
+    `expected "Aug 11, 2026", got "${formatPostDate(new Date('2026-08-11T09:00:00Z'))}"`
+  );
+  assert(
+    formatPostDate(new Date('2026-08-09T09:00:00Z')) === 'Aug 09, 2026',
+    'single-digit days must be zero-padded'
+  );
+});
+
+check('formatPostDate renders the South African day, not the UTC one', () => {
+  // 22:30 UTC on the 17th is 00:30 SAST on the 18th. Without the explicit
+  // Africa/Johannesburg zone a late-evening run would stamp the previous day.
+  assert(
+    formatPostDate(new Date('2026-08-17T22:30:00Z')) === 'Aug 18, 2026',
+    `expected the SAST date "Aug 18, 2026", got "${formatPostDate(new Date('2026-08-17T22:30:00Z'))}"`
+  );
 });
 
 check('a legitimate post mentioning statistics and sources passes', () => {

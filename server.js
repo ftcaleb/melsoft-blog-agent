@@ -4,11 +4,12 @@ import path from 'path';
 import { fileURLToPath } from 'url';
 import { generateCandidates, refreshResearchCache } from './src/research.js';
 import { selectTopics, selectTopicsForPillar, pillarForDate } from './src/select.js';
-import { writePost, PostValidationError } from './src/writer.js';
+import { writePost, PostValidationError, formatPostDate } from './src/writer.js';
 import { supabase } from './src/supabaseClient.js';
 import { markdownToBlocks, computeReadTime } from './src/markdownToBlocks.js';
 import { registerDiscordRoutes, topicHash } from './src/discordInteractions.js';
 import { notifyDiscord, notifyFailure } from './src/notify.js';
+import { generateFeaturedImageSafe, regenerateImageForDraft, ImageGenerationError } from './src/imageGen.js';
 
 // Re-exported for backwards compatibility: scripts/testDiscordNotify.js imports
 // notifyDiscord from here. The implementation now lives in src/notify.js so
@@ -182,7 +183,10 @@ app.get('/api/cron/refresh-topics', async (req, res) => {
         `Topic research ran but no ${targetPillar} topics were available today.\n\n` +
         `👉 **Open the blog agent:** ${appUrl}`;
     }
-    await notifyDiscord(message, buttons);
+    // mention: true — this is the unattended daily run. Without a ping the
+    // message is easy to miss entirely, and the whole flow depends on someone
+    // noticing the day's topics are ready.
+    await notifyDiscord(message, buttons, { mention: true });
 
     return res.json({ ok: true, refreshedAt: new Date().toISOString(), count: candidates.length });
   } catch (err) {
@@ -266,11 +270,35 @@ app.post('/api/approve', async (req, res) => {
     }
 
     console.log(`\n[API POST /api/approve] Writing post for: "${topic.title}"...`);
+
+    // The featured image is generated CONCURRENTLY with the article, not after
+    // it. Run sequentially the two would routinely exceed Vercel's 60s
+    // maxDuration — writePost alone takes 30-60s — turning a working draft into
+    // a timeout. The image prompt is derived from the TOPIC, not the finished
+    // article, so there is nothing to wait for.
+    //
+    // generateFeaturedImageSafe never rejects: if generation or upload fails the
+    // post is still saved, just without a hero, exactly as before images were
+    // automated. A written article must never be lost over a decorative asset.
+    //
+    // Trade-off accepted: if writePost then fails its content gate, the image
+    // has already been generated and is orphaned in storage. That costs one
+    // image and no correctness — the alternative is paying the latency of
+    // running them in series on every single request.
+    const imagePromise = generateFeaturedImageSafe(topic);
+
     const post = await writePost(topic);
 
     console.log(`[API POST /api/approve] Converting markdown to blocks and computing read time...`);
     const body = markdownToBlocks(post.bodyMarkdown, post.title);
     const readTime = computeReadTime(post.bodyMarkdown);
+
+    const image = await imagePromise;
+    console.log(
+      image
+        ? `[API POST /api/approve] Featured image ready (${image.provider}, ${(image.bytes / 1024).toFixed(0)}KB): ${image.url}`
+        : '[API POST /api/approve] No featured image — saving the draft without one.'
+    );
 
     const postData = {
       status: 'draft',
@@ -282,7 +310,14 @@ app.post('/api/approve', async (req, res) => {
       raw_markdown: post.bodyMarkdown,
       pillar: post.pillar,
       source_topic: post.sourceTopic,
-      type: post.type
+      type: post.type,
+      image: image ? image.url : null,
+      // Display date. Previously left empty and typed by hand for every post,
+      // which blocked the dashboard's Publish button on every generated draft
+      // (it requires this field) — and, worse, did NOT block Discord's publish
+      // path, which validates nothing. Generating it closes that gap and stops
+      // the format drifting between posts. Still editable in the dashboard.
+      post_date: formatPostDate()
     };
 
     console.log(`[API POST /api/approve] Inserting draft post into Supabase...`);
@@ -332,7 +367,9 @@ app.post('/api/approve', async (req, res) => {
       }
     }
 
-    res.json({ success: true, draftId: data.id, slug: data.slug });
+    // The image URL is returned so the dashboard can show the hero immediately
+    // on the draft it opens, without a second round-trip.
+    res.json({ success: true, draftId: data.id, slug: data.slug, image: image ? image.url : null });
   } catch (error) {
     // A draft rejected by the writer's content gate never reached Supabase.
     // Report it distinctly from a genuine save failure so the cause is obvious
@@ -355,6 +392,38 @@ app.post('/api/approve', async (req, res) => {
     }
     console.error('[API POST /api/approve] Error generating/logging post:', error);
     res.status(500).json({ error: 'Failed to save draft', details: error.message });
+  }
+});
+
+// Regenerates the featured image for an existing DRAFT and persists it.
+// Backs the dashboard's "Generate with AI" button, and shares
+// regenerateImageForDraft() with the Discord button so the draft-only rule
+// cannot drift between the two entry points.
+//
+// Unlike the draft-save path this uses the THROWING variant: the user asked for
+// an image explicitly, so a failure must be reported rather than silently
+// swallowed.
+app.post('/api/image', async (req, res) => {
+  try {
+    const { draftId } = req.body || {};
+    if (!draftId) {
+      return res.status(400).json({ error: 'Missing draftId' });
+    }
+
+    console.log(`\n[API POST /api/image] Regenerating featured image for draft ${draftId}...`);
+    const result = await regenerateImageForDraft(draftId);
+    console.log(`[API POST /api/image] New image: ${result.url}`);
+
+    return res.json({ success: true, image: result.url, scene: result.scene });
+  } catch (error) {
+    if (error instanceof ImageGenerationError) {
+      // 422: the request was well-formed but could not be fulfilled (not a
+      // draft, draft deleted, provider refused). Distinct from a server fault.
+      console.warn(`[API POST /api/image] Rejected: ${error.message}`);
+      return res.status(422).json({ error: error.message });
+    }
+    console.error('[API POST /api/image] Unexpected failure:', error);
+    return res.status(500).json({ error: 'Failed to regenerate the image', details: error.message });
   }
 });
 

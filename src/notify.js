@@ -5,6 +5,24 @@
 // re-exports notifyDiscord, so existing importers are unaffected.
 
 /**
+ * Discord user IDs to @mention on unattended notifications, from
+ * DISCORD_MENTION_USER_IDS (comma-separated). Empty when unset, which keeps the
+ * original no-mention behaviour.
+ *
+ * Parsed fresh each call so the env can change without a redeploy of this
+ * module's import graph — same approach as the DISCORD_ALLOWED_USER_IDS
+ * allow-list.
+ *
+ * @returns {string[]} User IDs
+ */
+function mentionUserIds() {
+  return (process.env.DISCORD_MENTION_USER_IDS || '')
+    .split(',')
+    .map((s) => s.trim())
+    .filter(Boolean);
+}
+
+/**
  * Sends a Discord notification. Awaited (so it finishes before a serverless
  * function returns) but non-fatal: everything is logged, never thrown.
  *
@@ -23,11 +41,25 @@
  *
  * @param {string} content Message text (truncated to Discord's 2000-char cap)
  * @param {object[]} [components] Optional action rows
+ * @param {{mention?: boolean}} [options] Set mention to prefix the configured
+ *   user IDs so the message raises a real Discord notification. Used for
+ *   UNATTENDED events (the scheduled run, failures) — not for replies to
+ *   something the user just clicked, where they are already looking.
  */
-export async function notifyDiscord(content, components) {
-  // Discord caps message content at 2000 chars.
-  const contentStr = String(content).slice(0, 1990);
+export async function notifyDiscord(content, components, { mention = false } = {}) {
+  const ids = mention ? mentionUserIds() : [];
+  const prefix = ids.length ? `${ids.map((id) => `<@${id}>`).join(' ')} ` : '';
+
+  // Discord caps message content at 2000 chars. The prefix is included in the
+  // budget so a long message cannot push the mention out.
+  const contentStr = `${prefix}${String(content)}`.slice(0, 1990);
   const hasComponents = Array.isArray(components) && components.length > 0;
+
+  // Pin down exactly who may be pinged. `parse: []` disables @everyone, @here
+  // and role mentions entirely, so a topic title that happens to contain
+  // "@everyone" can never notify the whole server — the model writes these
+  // titles, so that is not a hypothetical. Only the explicit ids ping.
+  const allowedMentions = { parse: [], users: ids };
 
   const botToken = process.env.DISCORD_BOT_TOKEN;
   const channelId = process.env.DISCORD_CHANNEL_ID;
@@ -43,7 +75,7 @@ export async function notifyDiscord(content, components) {
           'Content-Type': 'application/json',
           Authorization: `Bot ${botToken}`,
         },
-        body: JSON.stringify({ content: contentStr, components }),
+        body: JSON.stringify({ content: contentStr, components, allowed_mentions: allowedMentions }),
       });
       if (resp.ok) return;
       // Log status only — never the token or headers.
@@ -57,7 +89,7 @@ export async function notifyDiscord(content, components) {
   const url = process.env.DISCORD_WEBHOOK_URL;
   if (!url) return;
 
-  const base = { content: contentStr };
+  const base = { content: contentStr, allowed_mentions: allowedMentions };
 
   const send = (payload, withComponents) => {
     const endpoint = withComponents
@@ -107,7 +139,10 @@ export async function notifyFailure(context, summary, reasons = []) {
     if (reasons.length) {
       lines.push('', ...reasons.slice(0, 8).map((r) => `• ${r}`));
     }
-    await notifyDiscord(lines.join('\n'));
+    // mention: true — these fire unattended and are rare by design. The worst
+    // case is the 09:00 cron dying: no topics, no message, and the first sign
+    // otherwise is noticing days later that nothing was published.
+    await notifyDiscord(lines.join('\n'), undefined, { mention: true });
   } catch (err) {
     console.warn('[notify] Could not send failure alert:', err.message);
   }

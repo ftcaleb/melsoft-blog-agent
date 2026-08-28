@@ -20,9 +20,10 @@ import { waitUntil } from '@vercel/functions';
 
 import { generateCandidates } from './research.js';
 import { selectTopics } from './select.js';
-import { writePost } from './writer.js';
+import { writePost, formatPostDate } from './writer.js';
 import { supabase } from './supabaseClient.js';
 import { markdownToBlocks, computeReadTime } from './markdownToBlocks.js';
+import { generateFeaturedImageSafe, regenerateImageForDraft } from './imageGen.js';
 
 const DISCORD_API_BASE = 'https://discord.com/api/v10';
 
@@ -150,9 +151,20 @@ async function runGenerate(topicInput) {
   topic.type = topic.type || 'evergreen';
   topic.sourceNotes = topic.sourceNotes || 'Requested via Discord /generate';
 
+  // Featured image generation runs CONCURRENTLY with the article, mirroring
+  // /api/approve. Serially the two would exceed Vercel's 60s maxDuration and the
+  // interaction would time out with nothing to show. The image prompt derives
+  // from the TOPIC, not the finished article, so there is nothing to wait for.
+  //
+  // Safe variant: a failure here leaves the draft imageless rather than losing
+  // it. The Discord message then simply carries no preview.
+  const imagePromise = generateFeaturedImageSafe(topic);
+
   const post = await writePost(topic);
   const body = markdownToBlocks(post.bodyMarkdown, post.title);
   const readTime = computeReadTime(post.bodyMarkdown);
+
+  const image = await imagePromise;
 
   const postData = {
     status: 'draft',
@@ -165,6 +177,11 @@ async function runGenerate(topicInput) {
     pillar: post.pillar,
     source_topic: post.sourceTopic,
     type: post.type,
+    // Display date — see the matching comment in server.js /api/approve. This
+    // path matters most: runPublish() performs no field validation at all, so
+    // without this a Discord-published post went live with no date shown.
+    post_date: formatPostDate(),
+    image: image ? image.url : null,
   };
 
   let { data, error } = await supabase
@@ -199,29 +216,56 @@ async function runGenerate(topicInput) {
     }
   }
 
-  return { draftId: data.id, slug: data.slug, title: data.title, excerpt: post.metaDescription };
+  return {
+    draftId: data.id,
+    slug: data.slug,
+    title: data.title,
+    excerpt: post.metaDescription,
+    image: image ? image.url : null,
+  };
 }
 
 // Flips a draft to published the SAME way the dashboard publish action does
 // (status='published' + published_at timestamp). Confirms the slug exists as a
 // draft first; returns { ok:false, message } instead of throwing when it does
 // not, so the caller can reply cleanly.
-async function runPublish(slug) {
-  const clean = String(slug || '').trim();
-  if (!clean) return { ok: false, message: 'No slug provided.' };
+async function runPublish(ref) {
+  const clean = String(ref || '').trim();
+  if (!clean) return { ok: false, message: 'No post reference provided.' };
 
-  const { data: existing, error: findErr } = await supabase
-    .from('posts')
-    .select('id, slug, status, title')
-    .eq('slug', clean)
-    .maybeSingle();
+  // Two accepted forms:
+  //   "id:<uuid>"  the Publish BUTTON — always 39 chars, so `publish:id:<uuid>`
+  //                is 47 and can never breach Discord's 100-char custom_id cap.
+  //   "<slug>"     the `/publish <slug>` slash command, and any button from
+  //                before this change that still carries a raw slug.
+  //
+  // The slug form was the only one originally, and it silently cost 7 of 18
+  // real posts their Publish button: titles here routinely produce slugs of
+  // 90-106 chars, and `publish:` + those exceeds the cap. The button was then
+  // dropped rather than rendered, with no visible explanation.
+  const byId = clean.startsWith('id:');
+  const value = byId ? clean.slice(3) : clean;
+
+  const base = supabase.from('posts').select('id, slug, status, title');
+  const { data: existing, error: findErr } = byId
+    ? await base.eq('id', value).maybeSingle()
+    : await base.eq('slug', value).maybeSingle();
 
   if (findErr) return { ok: false, message: `Lookup failed: ${findErr.message}` };
-  if (!existing) return { ok: false, message: `No post found with slug \`${clean}\`.` };
+  if (!existing) {
+    return {
+      ok: false,
+      message: byId
+        ? 'That draft no longer exists — it may have been deleted.'
+        : `No post found with slug \`${value}\`.`,
+    };
+  }
   if (existing.status === 'published') {
     return {
       ok: false,
-      message: `ℹ️ Already published: ${existing.title}\n🔗 ${LIVE_POST_BASE}/${clean}`,
+      // Always build the live URL from the ROW's slug, never from the incoming
+      // reference — under the `id:<uuid>` form the reference is not a slug.
+      message: `ℹ️ Already published: ${existing.title}\n🔗 ${LIVE_POST_BASE}/${existing.slug}`,
     };
   }
 
@@ -233,16 +277,26 @@ async function runPublish(slug) {
   if (updErr) return { ok: false, message: `Publish failed: ${updErr.message}` };
   return {
     ok: true,
-    message: `✅ Published: ${existing.title}\n🔗 ${LIVE_POST_BASE}/${clean}`,
+    message: `✅ Published: ${existing.title}\n🔗 ${LIVE_POST_BASE}/${existing.slug}`,
     title: existing.title,
   };
+}
+
+// Friendly, on-brand wrapper for error replies. Non-technical people in the
+// channel see the bot, not the code — a bare stack/JSON blob reads as "the
+// bot is broken" even for a normal, recoverable hiccup. `intro` carries the
+// human tone; the real error still rides along in a code block underneath,
+// so nothing is ever hidden from whoever needs to actually debug it.
+function friendlyError(intro, err) {
+  const detail = (err && err.message) ? err.message : String(err);
+  return `${intro}\n\`\`\`${detail.slice(0, 900)}\`\`\``;
 }
 
 // PATCHes the deferred interaction's original response with the final message.
 // Uses node's built-in fetch, same one-way pattern as notifyDiscord() in
 // server.js. The interaction token authorizes this call, so no bot token is
 // needed and nothing secret is logged.
-async function editOriginalResponse(interaction, content, components) {
+async function editOriginalResponse(interaction, content, components, embeds) {
   const applicationId = interaction.application_id || process.env.DISCORD_APPLICATION_ID;
   const url = `${DISCORD_API_BASE}/webhooks/${applicationId}/${interaction.token}/messages/@original`;
   const payload = { content: String(content).slice(0, 1990) };
@@ -251,6 +305,11 @@ async function editOriginalResponse(interaction, content, components) {
   // so existing callers (publish/topics) are unaffected.
   if (Array.isArray(components) && components.length > 0) {
     payload.components = components;
+  }
+  // Embeds carry the featured-image preview. Attached only when present, so
+  // every pre-existing caller sends a byte-identical payload to before.
+  if (Array.isArray(embeds) && embeds.length > 0) {
+    payload.embeds = embeds;
   }
   try {
     const resp = await fetch(url, {
@@ -284,43 +343,134 @@ function keepAlive(promise) {
 // Runs generate/publish work after a deferred ack and edits the followup with
 // the result. Shared by BOTH slash commands and button clicks. Never throws to
 // the request handler — failures become a followup message.
+// Melsoft brand plum (#720075) as the embed's accent stripe.
+const EMBED_COLOUR = 0x720075;
+
+/**
+ * Builds the draft-preview embed. When a featured image exists it renders full
+ * width above the buttons, so the image can be REVIEWED before publishing —
+ * the only real quality control on an automated image, since nothing downstream
+ * inspects what the model actually drew.
+ *
+ * Returns undefined when there is no image, leaving the plain-text message
+ * exactly as it was before images existed.
+ *
+ * @param {string} title Post title
+ * @param {string} excerpt Meta description
+ * @param {string|null} image Public image URL
+ * @returns {object[]|undefined}
+ */
+export function buildDraftEmbeds(title, excerpt, image) {
+  if (!image) return undefined;
+  return [
+    {
+      title: String(title || 'Untitled draft').slice(0, 256),
+      description: String(excerpt || '').slice(0, 400),
+      color: EMBED_COLOUR,
+      image: { url: image },
+      footer: { text: 'Review the image before publishing' },
+    },
+  ];
+}
+
+/**
+ * Buttons shown under a draft: Publish, plus Regenerate image when there is an
+ * image to replace.
+ *
+ * Both reference the draft by UUID (`publish:id:<uuid>` = 47 chars,
+ * `regenimg:id:<uuid>` = 48). Slugs here run 68-106 chars and breached Discord's
+ * 100-char custom_id cap on 7 of 18 real posts, which silently dropped the
+ * button on exactly the long-titled posts.
+ *
+ * @param {string} draftId Post UUID
+ * @param {string|null} image Current image URL, if any
+ * @returns {object[]} Action rows
+ */
+export function buildDraftComponents(draftId, image) {
+  const buttons = [
+    {
+      type: 2, // BUTTON
+      style: 3, // SUCCESS (green) — distinct from the blue Generate buttons
+      label: 'Publish',
+      custom_id: `publish:id:${draftId}`,
+    },
+  ];
+
+  // Only offered when there is an image to replace. With no image the useful
+  // action is a manual upload in the dashboard, not another roll of the dice.
+  if (image) {
+    buttons.push({
+      type: 2,
+      style: 2, // SECONDARY (grey) — deliberately less prominent than Publish
+      label: 'Regenerate image',
+      custom_id: `regenimg:id:${draftId}`,
+    });
+  }
+
+  return [{ type: 1, components: buttons }]; // ACTION_ROW
+}
+
 async function handleGenerateDeferred(interaction, topicInput) {
   try {
-    const { slug, title, excerpt } = await runGenerate(topicInput);
+    const { draftId, slug, title, excerpt, image } = await runGenerate(topicInput);
     const preview = (excerpt || '').slice(0, 300);
-    const content =
-      `Draft ready: **${title}**\n` +
-      (preview ? `> ${preview}\n` : '') +
-      `Slug: \`${slug}\`\n` +
-      `Review the full draft in the dashboard: ${appUrl()}/dashboard.html`;
+    // With an embed the title and excerpt are shown there, so the message body
+    // is kept to the operational detail rather than repeating itself.
+    const content = image
+      ? `Draft ready — review the image below.\nSlug: \`${slug}\`\n${appUrl()}/dashboard.html`
+      : `Draft ready: **${title}**\n` +
+        (preview ? `> ${preview}\n` : '') +
+        `Slug: \`${slug}\`\n` +
+        `⚠️ No featured image was generated — the blog card will show a plain colour block.\n` +
+        `Review the full draft in the dashboard: ${appUrl()}/dashboard.html`;
 
-    // One-click Publish button (green / style 3) that reuses the EXISTING
-    // publish:<slug> MESSAGE_COMPONENT handler — no new routing. Authorization
-    // is enforced there (DISCORD_ALLOWED_USER_IDS); no extra confirmation step.
-    // Skipped only if the custom_id would exceed Discord's 100-char limit; the
-    // slug is in the text either way, so `/publish <slug>` still works.
-    const publishCustomId = `publish:${slug}`;
-    const components =
-      publishCustomId.length <= 100
-        ? [
-            {
-              type: 1, // ACTION_ROW
-              components: [
-                {
-                  type: 2, // BUTTON
-                  style: 3, // SUCCESS (green) — distinct from the blue Generate buttons
-                  label: 'Publish',
-                  custom_id: publishCustomId,
-                },
-              ],
-            },
-          ]
-        : undefined;
+    // One-click Publish button (green / style 3) reusing the existing
+    // `publish:` MESSAGE_COMPONENT handler — no new routing. Authorization is
+    // enforced there (DISCORD_ALLOWED_USER_IDS); no extra confirmation step.
+    //
+    // Referenced by DRAFT ID, not slug. `publish:id:<uuid>` is always 47 chars,
+    // where `publish:<slug>` ran 76-114 and breached Discord's 100-char cap on
+    // 7 of 18 real posts — silently dropping the button on exactly the
+    // long-titled posts, with nothing to explain why. The guard below is kept
+    // as a backstop but can no longer fire.
+    const components = buildDraftComponents(draftId, image);
 
-    await editOriginalResponse(interaction, content, components);
+    await editOriginalResponse(interaction, content, components, buildDraftEmbeds(title, excerpt, image));
   } catch (err) {
     console.warn('[discord] Generate failed:', err.message);
-    await editOriginalResponse(interaction, `Could not generate that draft: ${err.message}`);
+    // After writer.js's own retries, an API-status error here means Anthropic
+    // genuinely didn't come back — worth saying so explicitly rather than
+    // leaving it to be inferred from the raw error text below.
+    const apiFailure = err && (!err.status || err.status >= 500);
+    const intro = apiFailure
+      ? "😵‍💫 Well, this is awkward — Anthropic's API face-planted and stayed down even after a few retries. Probably just a hiccup on their end, try again in a few minutes."
+      : "😬 Couldn't get that draft written.";
+    await editOriginalResponse(interaction, friendlyError(intro, err));
+  }
+}
+
+/**
+ * Regenerates a draft's featured image and rebuilds the SAME message in place —
+ * new embed, same buttons — so the reviewer keeps tapping until the image is
+ * right, without the channel filling with near-duplicate drafts.
+ *
+ * Drafts only; regenerateImageForDraft() refuses published posts.
+ */
+async function handleRegenerateImageDeferred(interaction, ref) {
+  const draftId = String(ref || '').replace(/^id:/, '').trim();
+  try {
+    const { url, title, slug, excerpt } = await regenerateImageForDraft(draftId);
+    const content =
+      `Image regenerated — review it below.\nSlug: \`${slug}\`\n${appUrl()}/dashboard.html`;
+    await editOriginalResponse(
+      interaction,
+      content,
+      buildDraftComponents(draftId, url),
+      buildDraftEmbeds(title, excerpt, url)
+    );
+  } catch (err) {
+    console.warn('[discord] Image regeneration failed:', err.message);
+    await editOriginalResponse(interaction, friendlyError('🎨 The image regen didn’t stick.', err));
   }
 }
 
@@ -330,7 +480,7 @@ async function handlePublishDeferred(interaction, slug) {
     await editOriginalResponse(interaction, result.message);
   } catch (err) {
     console.warn('[discord] Publish failed:', err.message);
-    await editOriginalResponse(interaction, `Could not publish: ${err.message}`);
+    await editOriginalResponse(interaction, friendlyError('🚧 Publishing hit a snag.', err));
   }
 }
 
@@ -342,7 +492,7 @@ async function handleGenerateFromRef(interaction, payload) {
     topic = await resolveTopicRef(payload);
   } catch (err) {
     console.warn('[discord] Topic reference lookup failed:', err.message);
-    await editOriginalResponse(interaction, `Could not look that topic up: ${err.message}`);
+    await editOriginalResponse(interaction, friendlyError('🔍 Couldn’t track down that topic.', err));
     return;
   }
   if (topic === null) {
@@ -361,7 +511,7 @@ async function handleTopicsDeferred(interaction) {
     await editOriginalResponse(interaction, formatTopicsMessage(topics));
   } catch (err) {
     console.warn('[discord] Topics failed:', err.message);
-    await editOriginalResponse(interaction, `Could not load topics: ${err.message}`);
+    await editOriginalResponse(interaction, friendlyError('📋 Couldn’t pull up the topics list.', err));
   }
 }
 
@@ -489,6 +639,18 @@ export function registerDiscordRoutes(app) {
           return;
         }
 
+        // Regenerating spends money on a new image, so it sits behind the same
+        // allow-list as generate/publish rather than being treated as read-only.
+        if (action === 'regenimg') {
+          if (!isAuthorized(getInvokerId(interaction))) {
+            return ephemeral(res, "You're not authorized to regenerate images.");
+          }
+          if (!payload) return ephemeral(res, 'This button is missing a draft reference.');
+          defer(res, false); // public: visible to the whole channel
+          keepAlive(handleRegenerateImageDeferred(interaction, payload));
+          return;
+        }
+
         return ephemeral(res, `Unknown button action: ${action}`);
       }
 
@@ -499,7 +661,7 @@ export function registerDiscordRoutes(app) {
       // If we haven't responded yet, send a minimal ephemeral error. If we
       // already deferred, the deferred handlers own their own error followups.
       if (!res.headersSent) {
-        return ephemeral(res, 'Something went wrong handling that interaction.');
+        return ephemeral(res, friendlyError('🤖 Something went sideways handling that.', err));
       }
     }
   });
