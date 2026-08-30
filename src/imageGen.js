@@ -30,6 +30,7 @@ import { fileURLToPath } from 'url';
 import { supabase } from './supabaseClient.js';
 import { generateSlug } from './writer.js';
 import { logAnthropicUsage } from './usage.js';
+import { getProfile } from './profiles.js';
 
 dotenv.config();
 
@@ -54,7 +55,11 @@ const STORAGE_PREFIX = 'generated';
 const imageWidth = () => Number(process.env.IMAGE_WIDTH || 1024);
 const imageHeight = () => Number(process.env.IMAGE_HEIGHT || 576);
 const provider = () => (process.env.IMAGE_PROVIDER || 'cloudflare').toLowerCase();
-const style = () => (process.env.IMAGE_STYLE || 'photoreal').toLowerCase();
+// IMAGE_STYLE, if set, overrides EVERY line's style process-wide (useful for
+// forcing one style during manual testing). Unset, each line falls back to
+// its own profile default — Academy stays photoreal, Digital defaults to
+// illustration, with no env change required.
+const style = (profile) => (process.env.IMAGE_STYLE || (profile && profile.imageStyle) || 'photoreal').toLowerCase();
 
 /**
  * Thrown when image generation fails. Callers on the draft-save path should use
@@ -105,13 +110,20 @@ const STYLE_TEMPLATES = {
     ].join(' '),
 };
 
-// Used when Claude is unavailable or declines to describe a scene. Deliberately
-// generic but on-brand, so a prompt failure degrades to a plain-but-correct
-// image rather than to no image at all.
-const FALLBACK_SCENES = {
-  tech: 'a young South African professional working thoughtfully at a laptop in a bright modern office, mid-distance, seen slightly from behind',
-  skills: 'a small group of South African adult learners in a bright training room, engaged in discussion around a table',
-};
+/**
+ * Looks up the offline fallback scene for a topic's pillar/category under a
+ * profile's fallbackScenes map (case-insensitive key match), falling back to
+ * the profile's first scene if the pillar itself is unrecognised — a fallback
+ * for the fallback, so this never returns nothing.
+ *
+ * @param {import('./profiles.js').SiteProfile} profile
+ * @param {string} pillar
+ * @returns {string}
+ */
+function fallbackSceneFor(profile, pillar) {
+  const key = String(pillar || '').toLowerCase();
+  return profile.fallbackScenes[key] || Object.values(profile.fallbackScenes)[0];
+}
 
 /**
  * Asks Claude for a single concrete scene description for this article.
@@ -123,14 +135,14 @@ const FALLBACK_SCENES = {
  * cheapest place to prevent a mangled hand is to never ask for one.
  *
  * @param {object} topic { title, pillar, pitch }
- * @param {{variation?: boolean}} [options] Set variation when REGENERATING, so
+ * @param {{variation?: boolean, profile?: import('./profiles.js').SiteProfile}} [options] Set variation when REGENERATING, so
  *   the brief deliberately moves to a different setting rather than re-rolling
  *   the same concept. A bad image is often a bad idea, not a bad render.
+ *   profile defaults to Academy, matching every pre-existing caller.
  * @returns {Promise<string>} One-sentence scene description
  */
-export async function describeScene(topic, { variation = false } = {}) {
-  const pillar = topic.pillar === 'skills' ? 'skills' : 'tech';
-  const fallback = FALLBACK_SCENES[pillar];
+export async function describeScene(topic, { variation = false, profile = getProfile('academy') } = {}) {
+  const fallback = fallbackSceneFor(profile, topic.pillar);
 
   const apiKey = process.env.ANTHROPIC_API_KEY;
   if (!apiKey) {
@@ -138,7 +150,7 @@ export async function describeScene(topic, { variation = false } = {}) {
     return fallback;
   }
 
-  const wantsPeople = style() === 'photoreal';
+  const wantsPeople = style(profile) === 'photoreal';
   const instruction = wantsPeople
     ? [
         'Describe ONE concrete, photographable scene that evokes the article without illustrating it literally.',
@@ -151,10 +163,10 @@ export async function describeScene(topic, { variation = false } = {}) {
         'Objects and forms only — never people, faces, hands, text or logos.',
       ].join(' ');
 
-  const prompt = `You write scene briefs for the hero images on a South African training provider's blog.
+  const prompt = `${profile.imageFraming}
 
 Article title: "${topic.title}"
-Pillar: ${pillar}
+Pillar: ${topic.pillar}
 ${topic.pitch ? `Angle: ${topic.pitch}` : ''}
 
 ${instruction}
@@ -197,10 +209,11 @@ Respond with ONE sentence of 30 words or fewer describing only the scene. No pre
  * Assembles the final image prompt: fixed art direction + this post's scene.
  *
  * @param {string} scene One-sentence scene description
+ * @param {import('./profiles.js').SiteProfile} [profile] Defaults to Academy, matching every pre-existing caller
  * @returns {string} Complete prompt
  */
-export function buildImagePrompt(scene) {
-  const template = STYLE_TEMPLATES[style()] || STYLE_TEMPLATES.photoreal;
+export function buildImagePrompt(scene, profile = getProfile('academy')) {
+  const template = STYLE_TEMPLATES[style(profile)] || STYLE_TEMPLATES.photoreal;
   return template(scene);
 }
 
@@ -535,12 +548,13 @@ async function uploadToStorage(buffer, contentType, titleForSlug) {
  * generateFeaturedImageSafe() instead.
  *
  * @param {object} topic { title, pillar, pitch }
- * @param {{variation?: boolean}} [options] Pass variation on a REGENERATE so the
- *   scene brief moves to a different concept rather than re-rolling the same one
+ * @param {{variation?: boolean, profile?: import('./profiles.js').SiteProfile}} [options] Pass variation on a REGENERATE so the
+ *   scene brief moves to a different concept rather than re-rolling the same one.
+ *   profile defaults to Academy, matching every pre-existing caller.
  * @returns {Promise<{url: string, provider: string, model: string, bytes: number,
  *   width: number|null, height: number|null, scene: string, elapsedMs: number}>}
  */
-export async function generateFeaturedImage(topic, { variation = false } = {}) {
+export async function generateFeaturedImage(topic, { variation = false, profile = getProfile('academy') } = {}) {
   if (!topic || !topic.title) {
     throw new ImageGenerationError('A topic with a title is required');
   }
@@ -563,12 +577,12 @@ export async function generateFeaturedImage(topic, { variation = false } = {}) {
   }
 
   const started = Date.now();
-  const scene = await describeScene(topic, { variation });
-  const prompt = buildImagePrompt(scene);
+  const scene = await describeScene(topic, { variation, profile });
+  const prompt = buildImagePrompt(scene, profile);
 
   const width = imageWidth();
   const height = imageHeight();
-  console.log(`[imageGen] Provider=${selected} style=${style()} ${width}x${height}`);
+  console.log(`[imageGen] Line=${profile.key} Provider=${selected} style=${style(profile)} ${width}x${height}`);
   console.log(`[imageGen] Scene: ${scene}`);
 
   const { buffer, contentType, model } = await generate(prompt, width, height);
@@ -604,17 +618,18 @@ export async function generateFeaturedImage(topic, { variation = false } = {}) {
  * of anything that had already referenced it.
  *
  * @param {string} draftId The post's UUID
+ * @param {import('./profiles.js').SiteProfile} [profile] Which table to look the draft up in — defaults to Academy
  * @returns {Promise<{url: string, title: string, slug: string, excerpt: string,
  *   scene: string, previousImage: string|null}>}
  * @throws {ImageGenerationError} When the post is missing, is not a draft, or
  *   generation fails
  */
-export async function regenerateImageForDraft(draftId) {
+export async function regenerateImageForDraft(draftId, profile = getProfile('academy')) {
   const id = String(draftId || '').trim();
   if (!id) throw new ImageGenerationError('A draft id is required');
 
   const { data: post, error } = await supabase
-    .from('posts')
+    .from(profile.table)
     .select('id, slug, title, excerpt, pillar, status, image')
     .eq('id', id)
     .maybeSingle();
@@ -632,11 +647,11 @@ export async function regenerateImageForDraft(draftId) {
   // moves to a different setting rather than re-rolling the same concept.
   const result = await generateFeaturedImage(
     { title: post.title, pillar: post.pillar, pitch: post.excerpt },
-    { variation: true }
+    { variation: true, profile }
   );
 
   const { error: updErr } = await supabase
-    .from('posts')
+    .from(profile.table)
     .update({ image: result.url })
     .eq('id', post.id);
 
@@ -665,11 +680,12 @@ export async function regenerateImageForDraft(draftId) {
  * behaviour that existed before images were automated at all.
  *
  * @param {object} topic { title, pillar, pitch }
+ * @param {import('./profiles.js').SiteProfile} [profile] Defaults to Academy, matching every pre-existing caller
  * @returns {Promise<object|null>} The result, or null on any failure
  */
-export async function generateFeaturedImageSafe(topic) {
+export async function generateFeaturedImageSafe(topic, profile = getProfile('academy')) {
   try {
-    return await generateFeaturedImage(topic);
+    return await generateFeaturedImage(topic, { profile });
   } catch (err) {
     console.warn(`[imageGen] Featured image skipped: ${err.message}`);
     return null;

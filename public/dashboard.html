@@ -1294,10 +1294,16 @@
     <!-- 2. DRAFT LIST VIEW -->
     <div id="list-view" class="view-container">
       <div class="list-header">
-        <div class="list-tabs">
-          <button type="button" id="tab-draft" class="list-tab active" onclick="switchTab(event, 'draft')">Drafts</button>
-          <button type="button" id="tab-published" class="list-tab" onclick="switchTab(event, 'published')">Published</button>
-          <button type="button" id="tab-topics" class="list-tab" onclick="switchTab(event, 'topics')">Topics</button>
+        <div style="display: flex; align-items: center; gap: 0.75rem; flex-wrap: wrap;">
+          <div class="list-tabs">
+            <button type="button" id="tab-draft" class="list-tab active" onclick="switchTab(event, 'draft')">Drafts</button>
+            <button type="button" id="tab-published" class="list-tab" onclick="switchTab(event, 'published')">Published</button>
+            <button type="button" id="tab-topics" class="list-tab" onclick="switchTab(event, 'topics')">Topics</button>
+          </div>
+          <div class="list-tabs" id="line-tabs">
+            <button type="button" id="line-academy" class="list-tab active" onclick="switchLine(event, 'academy')">Academy</button>
+            <button type="button" id="line-digital" class="list-tab" onclick="switchLine(event, 'digital')">Digital</button>
+          </div>
         </div>
         <div style="display: flex; gap: 0.75rem;">
           <button type="button" id="refresh-btn" class="btn btn-secondary" onclick="refreshActive(event)">
@@ -1415,7 +1421,7 @@
               <input type="text" id="edit-author" class="input-field" placeholder="e.g. Sipho Nkosi" oninput="updateLivePreview()">
             </div>
             
-            <div class="form-group">
+            <div class="form-group" id="edit-author-role-group">
               <label for="edit-author-role">Author Role</label>
               <input type="text" id="edit-author-role" class="input-field" placeholder="e.g. Head of Data Science" oninput="updateLivePreview()">
             </div>
@@ -1526,9 +1532,33 @@
     let trendingTopics = [];  // candidate topics currently shown on the Topics tab
     let isGenerating = false; // guard: a post generation is in flight
 
-    // Live post URL on the Melsoft website (pattern: /blog-preview/<slug>).
-    const LIVE_POST_BASE = 'https://www.melsoftacademy.com/blog-preview';
-    function livePostUrl(slug) { return LIVE_POST_BASE + '/' + slug; }
+    // Second content line: Melsoft Digital's tech/AI blog, alongside Academy.
+    // Mirrors src/profiles.js on the server — list/open/save/publish/generate
+    // all read which table, live URL, and category set to use from here.
+    // Defaults to 'academy' so a fresh page load behaves exactly as it did
+    // before this line existed.
+    const LINE_CONFIG = {
+      academy: {
+        label: 'Academy',
+        table: 'posts',
+        liveBase: 'https://www.melsoftacademy.com/blog-preview',
+        categoryOptions: null, // free-text category field
+      },
+      digital: {
+        label: 'Digital',
+        table: 'blog_posts',
+        liveBase: 'https://melsoft-digital.vercel.app/blog',
+        categoryOptions: ['AI', 'Tech News'],
+      },
+    };
+    let currentLine = 'academy'; // 'academy' | 'digital' — active content line
+    // Captured at openDraft() time so Save/Publish always write to the table
+    // the open draft actually came from — decoupled from currentLine rather
+    // than assumed in sync with it, since a stray line switch mid-edit must
+    // never redirect a write to the wrong table.
+    let currentDraftLine = 'academy';
+
+    function livePostUrl(slug) { return LINE_CONFIG[currentLine].liveBase + '/' + slug; }
 
     // Initialize Supabase
     try {
@@ -1684,6 +1714,33 @@
       else loadList();
     }
 
+    // Switches the active content line (Academy | Digital) and reloads
+    // whichever tab is currently showing, the same way switchTab() does.
+    function switchLine(e, line) {
+      if (e) e.preventDefault();
+      if (currentLine === line) return;
+      currentLine = line;
+      ['academy', 'digital'].forEach(l => {
+        const btn = document.getElementById('line-' + l);
+        if (btn) btn.classList.toggle('active', l === line);
+      });
+      updateAdHocFormForLine();
+      if (currentTab === 'topics') loadTrending();
+      else loadList();
+    }
+
+    // Swaps the ad-hoc "Add your own topic" pillar/category dropdown to match
+    // the active line — Academy's tech/skills pillars vs Digital's AI/Tech
+    // News categories. The value sent is whatever LINE_CONFIG says is valid,
+    // so runGeneration() never has to know the difference.
+    function updateAdHocFormForLine() {
+      const sel = document.getElementById('custom-pillar');
+      const opts = LINE_CONFIG[currentLine].categoryOptions;
+      sel.innerHTML = opts
+        ? opts.map(o => `<option value="${o}">${o}</option>`).join('')
+        : '<option value="tech">Tech</option><option value="skills">Skills</option>';
+    }
+
     // Loads the posts for the active tab (draft or published) into the grid.
     async function loadList(e) {
       if (e && e.preventDefault) e.preventDefault();
@@ -1703,7 +1760,7 @@
 
       try {
         const { data, error } = await supabaseClient
-          .from('posts')
+          .from(LINE_CONFIG[currentLine].table)
           .select('id, title, excerpt, created_at, published_at, status, tint, slug, read_time, image')
           .eq('status', status)
           .order(isPublished ? 'published_at' : 'created_at', { ascending: false });
@@ -1798,7 +1855,7 @@
         : 'Delete this draft permanently? This cannot be undone.';
       if (!confirm(confirmMsg)) return;
       try {
-        const { error } = await supabaseClient.from('posts').delete().eq('id', id);
+        const { error } = await supabaseClient.from(LINE_CONFIG[currentLine].table).delete().eq('id', id);
         if (error) throw error;
         showStatus(isPublished ? 'Post deleted.' : 'Draft deleted.', 'success');
         loadList();
@@ -1830,7 +1887,7 @@
       loader.style.display = 'block';
 
       try {
-        const resp = await fetch('/api/topics', { headers: await authHeaders() });
+        const resp = await fetch('/api/topics?profile=' + encodeURIComponent(currentLine), { headers: await authHeaders() });
         if (resp.status === 401) { showStatus('Your session expired — please sign in again.', 'error'); return; }
         if (!resp.ok) throw new Error('Server returned ' + resp.status);
         const data = await resp.json();
@@ -1892,7 +1949,7 @@
         const resp = await fetch('/api/approve', {
           method: 'POST',
           headers: await authHeaders({ 'Content-Type': 'application/json' }),
-          body: JSON.stringify({ topic })
+          body: JSON.stringify({ topic, profile: currentLine })
         });
         if (resp.status === 401) { showStatus('Your session expired — please sign in again.', 'error'); return; }
         const result = await resp.json().catch(() => ({}));
@@ -1919,11 +1976,15 @@
       if (!supabaseClient) return;
 
       currentDraftId = draftId;
+      // Captured now, not read live from currentLine later — Save/Publish must
+      // keep writing to the table this draft actually came from even if the
+      // line toggle is touched while the detail view is open.
+      currentDraftLine = currentLine;
       showStatus('Loading draft details...', 'success', 2000);
 
       try {
         const { data, error } = await supabaseClient
-          .from('posts')
+          .from(LINE_CONFIG[currentDraftLine].table)
           .select('*')
           .eq('id', draftId)
           .single();
@@ -1938,11 +1999,18 @@
         // Fill form fields
         document.getElementById('edit-title').value = data.title || '';
         document.getElementById('edit-excerpt').value = data.excerpt || '';
-        document.getElementById('edit-category').value = data.category || '';
+        const categoryInput = document.getElementById('edit-category');
+        categoryInput.value = data.category || '';
+        const catOpts = LINE_CONFIG[currentDraftLine].categoryOptions;
+        categoryInput.placeholder = catOpts ? catOpts.join(' or ') : 'e.g. Careers, Technology';
         document.getElementById('edit-post-date').value = data.post_date || '';
         document.getElementById('edit-author').value = data.author || '';
         document.getElementById('edit-author-role').value = data.author_role || '';
-        
+        // Digital's blog_posts table has no author_role column — hide the
+        // field rather than let it collect a value that can never be saved.
+        document.getElementById('edit-author-role-group').style.display =
+          currentDraftLine === 'academy' ? '' : 'none';
+
         // Select correct tint
         const tintSelect = document.getElementById('edit-tint');
         if (data.tint) {
@@ -2223,16 +2291,18 @@
           category,
           post_date: postDate,
           author,
-          author_role: authorRole,
           tint
         };
+        // Digital's blog_posts table has no author_role column — writing it
+        // there would error on an unknown column.
+        if (currentDraftLine === 'academy') updateData.author_role = authorRole;
         // Only written when changed in this session. Otherwise the field is left
         // alone, so a save cannot clobber an image set elsewhere (Discord's
         // Regenerate, or another tab) since this draft was opened.
         if (imageDirty) updateData.image = currentUploadedImageUrl;
 
         const { data, error } = await supabaseClient
-          .from('posts')
+          .from(LINE_CONFIG[currentDraftLine].table)
           .update(updateData)
           .eq('id', currentDraftId);
 
@@ -2269,7 +2339,7 @@
       if (!category) missing.push('Category');
       if (!postDate) missing.push('Display date');
       if (!author) missing.push('Author name');
-      if (!authorRole) missing.push('Author role');
+      if (currentDraftLine === 'academy' && !authorRole) missing.push('Author role');
 
       if (missing.length > 0) {
         showStatus('Cannot publish — please fill in: ' + missing.join(', ') + '.', 'error');
@@ -2286,7 +2356,7 @@
       if (!imageDirty) {
         try {
           const { data: fresh } = await supabaseClient
-            .from('posts')
+            .from(LINE_CONFIG[currentDraftLine].table)
             .select('image')
             .eq('id', currentDraftId)
             .single();
@@ -2318,20 +2388,22 @@
         // `image` is included unconditionally here, but it has just been
         // reconciled against the database above, so it is the current value
         // either way — never the stale one captured at open time.
+        const publishData = {
+          title,
+          excerpt,
+          category,
+          post_date: postDate,
+          author,
+          tint,
+          image: currentUploadedImageUrl,
+          status: 'published',
+          published_at: new Date().toISOString()
+        };
+        if (currentDraftLine === 'academy') publishData.author_role = authorRole;
+
         const { error } = await supabaseClient
-          .from('posts')
-          .update({
-            title,
-            excerpt,
-            category,
-            post_date: postDate,
-            author,
-            author_role: authorRole,
-            tint,
-            image: currentUploadedImageUrl,
-            status: 'published',
-            published_at: new Date().toISOString()
-          })
+          .from(LINE_CONFIG[currentDraftLine].table)
+          .update(publishData)
           .eq('id', currentDraftId);
 
         if (error) throw error;

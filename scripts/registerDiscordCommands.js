@@ -31,10 +31,26 @@ if (!APPLICATION_ID || !BOT_TOKEN) {
 // STRING option type = 3 in the Discord API.
 const STRING_OPTION = 3;
 
+// Optional on every command; omitting it defaults to Academy (see
+// src/profiles.js getProfile()), so every existing invocation habit keeps
+// working unchanged. Choice VALUES are the profile keys used throughout the
+// codebase (PROFILES.academy / PROFILES.digital) — not just display labels.
+const LINE_OPTION = {
+  type: STRING_OPTION,
+  name: 'line',
+  description: 'Which content line — defaults to Academy if omitted.',
+  required: false,
+  choices: [
+    { name: 'Academy', value: 'academy' },
+    { name: 'Digital', value: 'digital' },
+  ],
+};
+
 const commands = [
   {
     name: 'topics',
     description: 'Show the current trending blog topics (from the research cache).',
+    options: [LINE_OPTION],
   },
   {
     name: 'generate',
@@ -46,6 +62,7 @@ const commands = [
         description: 'The topic title to write a draft about.',
         required: true,
       },
+      LINE_OPTION,
     ],
   },
   {
@@ -58,6 +75,7 @@ const commands = [
         description: 'The slug of the draft to publish.',
         required: true,
       },
+      LINE_OPTION,
     ],
   },
 ];

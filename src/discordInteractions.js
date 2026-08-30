@@ -19,17 +19,37 @@ import {
 import { waitUntil } from '@vercel/functions';
 
 import { generateCandidates } from './research.js';
-import { selectTopics } from './select.js';
+import { selectTopics, selectTopicsForDigital } from './select.js';
 import { writePost, formatPostDate } from './writer.js';
 import { supabase } from './supabaseClient.js';
 import { markdownToBlocks, computeReadTime } from './markdownToBlocks.js';
 import { generateFeaturedImageSafe, regenerateImageForDraft } from './imageGen.js';
+import { PROFILES, getProfile } from './profiles.js';
 
 const DISCORD_API_BASE = 'https://discord.com/api/v10';
 
-// Live post URL base on the Melsoft website (the same base the dashboard's
-// "View live" button uses). A published post lives at `${LIVE_POST_BASE}/${slug}`.
-const LIVE_POST_BASE = 'https://www.melsoftacademy.com/blog-preview';
+/**
+ * Splits a button/command payload into its content-line and the underlying
+ * reference, e.g. "digital:id:<uuid>" -> { profile: digital, ref: "id:<uuid>" }.
+ *
+ * Backward compatible by construction: a payload with NO recognised line
+ * prefix (every button that existed before this feature — "id:<uuid>",
+ * "h:<hash>", a raw slug/title) falls through to Academy with the payload
+ * untouched, so draft/publish buttons already posted in Discord before this
+ * deploy keep working exactly as they did.
+ *
+ * @param {string} payload
+ * @returns {{ profile: import('./profiles.js').SiteProfile, ref: string }}
+ */
+function parseLinePayload(payload) {
+  const raw = String(payload || '');
+  const sep = raw.indexOf(':');
+  const firstSeg = sep === -1 ? raw : raw.slice(0, sep);
+  if (PROFILES[firstSeg]) {
+    return { profile: PROFILES[firstSeg], ref: raw.slice(sep + 1) };
+  }
+  return { profile: PROFILES.academy, ref: raw };
+}
 
 // ---------------------------------------------------------------------------
 // Small helpers (shared by slash-command AND button handlers so the two never
@@ -65,9 +85,10 @@ function isAuthorized(userId) {
 
 // Reads the current trending topics the SAME way GET /api/topics does: from the
 // Supabase-backed research cache (no billed re-research) unless forceFresh.
-async function getSelectedTopics({ forceFresh = false } = {}) {
-  const candidates = await generateCandidates({ forceFresh });
-  return selectTopics(candidates);
+// Academy keeps its fixed 2-tech/1-skills selection; Digital has no fixed mix.
+async function getSelectedTopics({ forceFresh = false, profile = getProfile('academy') } = {}) {
+  const candidates = await generateCandidates({ forceFresh, profile });
+  return profile.key === 'digital' ? selectTopicsForDigital(candidates) : selectTopics(candidates);
 }
 
 // Short, stable reference for a topic, used inside a button's custom_id.
@@ -93,14 +114,15 @@ export function topicHash(title) {
 //                 or null when nothing matches (topics rotated / already written).
 //   anything else -> treated as a literal title, preserving older buttons that
 //                 still carry the full title in their custom_id.
-async function resolveTopicRef(payload) {
+async function resolveTopicRef(payload, profile = getProfile('academy')) {
   if (!/^h:[0-9a-f]{8}$/i.test(payload)) return payload; // legacy full-title button
   const hash = payload.slice(2).toLowerCase();
-  const candidates = await generateCandidates({ forceFresh: false });
+  const candidates = await generateCandidates({ forceFresh: false, profile });
   return candidates.find((c) => topicHash(c.title) === hash) || null;
 }
 
-function formatTopicsMessage(topics) {
+function formatTopicsMessage(topics, profile = getProfile('academy')) {
+  const heading = profile.key === 'academy' ? 'Current trending topics' : `Current trending topics (${profile.label})`;
   if (!Array.isArray(topics) || topics.length === 0) {
     return 'No trending topics are cached right now. Try again after the next scheduled research run.';
   }
@@ -109,14 +131,14 @@ function formatTopicsMessage(topics) {
     const pitch = t.pitch ? `\n   ${t.pitch}` : '';
     return `**${i + 1}.** ${tag} ${t.title}${pitch}`;
   });
-  return `**Current trending topics**\n\n${lines.join('\n\n')}\n\nUse \`/generate <topic>\` to draft one.`;
+  return `**${heading}**\n\n${lines.join('\n\n')}\n\nUse \`/generate <topic>\` to draft one.`;
 }
 
 // Writes a draft the SAME way POST /api/approve does: writePost() -> convert
 // markdown to blocks + read time -> insert into Supabase (with the 23505
 // duplicate-slug retry). Returns { draftId, slug, title, excerpt }.
 // Does NOT publish. `topicInput` may be a full candidate object or a bare title.
-async function runGenerate(topicInput) {
+async function runGenerate(topicInput, profile = getProfile('academy')) {
   // Accept either a candidate object or a plain topic title string.
   let topic =
     typeof topicInput === 'string'
@@ -133,7 +155,7 @@ async function runGenerate(topicInput) {
   // ad-hoc topic if there's no match or the lookup fails.
   if (!topic.pillar || !topic.pitch) {
     try {
-      const candidates = await generateCandidates({ forceFresh: false });
+      const candidates = await generateCandidates({ forceFresh: false, profile });
       const needle = topic.title.toLowerCase().replace(/[^a-z0-9]/g, '');
       const match = candidates.find((c) => {
         const hay = String(c.title || '').toLowerCase().replace(/[^a-z0-9]/g, '');
@@ -145,9 +167,9 @@ async function runGenerate(topicInput) {
     }
   }
 
-  // Minimal defaults so writePost + the posts insert always have sane values.
+  // Minimal defaults so writePost + the insert always have sane values.
   topic.pitch = topic.pitch || `Ad-hoc topic requested via Discord: ${topic.title}`;
-  topic.pillar = topic.pillar || 'tech';
+  topic.pillar = topic.pillar || profile.categories[0];
   topic.type = topic.type || 'evergreen';
   topic.sourceNotes = topic.sourceNotes || 'Requested via Discord /generate';
 
@@ -158,14 +180,17 @@ async function runGenerate(topicInput) {
   //
   // Safe variant: a failure here leaves the draft imageless rather than losing
   // it. The Discord message then simply carries no preview.
-  const imagePromise = generateFeaturedImageSafe(topic);
+  const imagePromise = generateFeaturedImageSafe(topic, profile);
 
-  const post = await writePost(topic);
+  const post = await writePost(topic, profile);
   const body = markdownToBlocks(post.bodyMarkdown, post.title);
   const readTime = computeReadTime(post.bodyMarkdown);
 
   const image = await imagePromise;
 
+  // Shared fields across both tables. `posts` (Academy) and `blog_posts`
+  // (Digital) diverge from here: Academy tracks pillar/type, Digital tracks
+  // category/tint/author instead — see the create-table SQL in the project plan.
   const postData = {
     status: 'draft',
     slug: post.slug,
@@ -174,9 +199,7 @@ async function runGenerate(topicInput) {
     body,
     read_time: readTime,
     raw_markdown: post.bodyMarkdown,
-    pillar: post.pillar,
     source_topic: post.sourceTopic,
-    type: post.type,
     // Display date — see the matching comment in server.js /api/approve. This
     // path matters most: runPublish() performs no field validation at all, so
     // without this a Discord-published post went live with no date shown.
@@ -184,8 +207,17 @@ async function runGenerate(topicInput) {
     image: image ? image.url : null,
   };
 
+  if (profile.key === 'digital') {
+    postData.category = post.pillar;
+    postData.tint = profile.categoryTint[post.pillar] || null;
+    postData.author = profile.author;
+  } else {
+    postData.pillar = post.pillar;
+    postData.type = post.type;
+  }
+
   let { data, error } = await supabase
-    .from('posts')
+    .from(profile.table)
     .insert([postData])
     .select()
     .single();
@@ -195,7 +227,7 @@ async function runGenerate(topicInput) {
     // short unique suffix — identical to POST /api/approve.
     if (error.code === '23505') {
       postData.slug = post.slug + '-' + Date.now().toString(36).slice(-4);
-      const retry = await supabase.from('posts').insert([postData]).select().single();
+      const retry = await supabase.from(profile.table).insert([postData]).select().single();
       if (retry.error) throw new Error(retry.error.message);
       data = retry.data;
     } else {
@@ -204,11 +236,13 @@ async function runGenerate(topicInput) {
   }
 
   // Persist the topic cluster for per-cluster performance reporting (Deliverable
-  // 6/7). Best-effort separate update so a missing `cluster` column only warns —
-  // it never fails the draft save. Populates automatically once the column exists.
-  if (post.cluster) {
+  // 6/7). Academy-only concept — Digital has no `cluster` column and
+  // classifyCluster() never resolves one for it anyway. Best-effort separate
+  // update so a missing `cluster` column only warns — it never fails the draft
+  // save.
+  if (profile.key === 'academy' && post.cluster) {
     const { error: clusterErr } = await supabase
-      .from('posts')
+      .from(profile.table)
       .update({ cluster: post.cluster })
       .eq('id', data.id);
     if (clusterErr) {
@@ -229,7 +263,7 @@ async function runGenerate(topicInput) {
 // (status='published' + published_at timestamp). Confirms the slug exists as a
 // draft first; returns { ok:false, message } instead of throwing when it does
 // not, so the caller can reply cleanly.
-async function runPublish(ref) {
+async function runPublish(ref, profile = getProfile('academy')) {
   const clean = String(ref || '').trim();
   if (!clean) return { ok: false, message: 'No post reference provided.' };
 
@@ -246,7 +280,7 @@ async function runPublish(ref) {
   const byId = clean.startsWith('id:');
   const value = byId ? clean.slice(3) : clean;
 
-  const base = supabase.from('posts').select('id, slug, status, title');
+  const base = supabase.from(profile.table).select('id, slug, status, title');
   const { data: existing, error: findErr } = byId
     ? await base.eq('id', value).maybeSingle()
     : await base.eq('slug', value).maybeSingle();
@@ -265,19 +299,19 @@ async function runPublish(ref) {
       ok: false,
       // Always build the live URL from the ROW's slug, never from the incoming
       // reference — under the `id:<uuid>` form the reference is not a slug.
-      message: `ℹ️ Already published: ${existing.title}\n🔗 ${LIVE_POST_BASE}/${existing.slug}`,
+      message: `ℹ️ Already published: ${existing.title}\n🔗 ${profile.liveBase}/${existing.slug}`,
     };
   }
 
   const { error: updErr } = await supabase
-    .from('posts')
+    .from(profile.table)
     .update({ status: 'published', published_at: new Date().toISOString() })
     .eq('id', existing.id);
 
   if (updErr) return { ok: false, message: `Publish failed: ${updErr.message}` };
   return {
     ok: true,
-    message: `✅ Published: ${existing.title}\n🔗 ${LIVE_POST_BASE}/${existing.slug}`,
+    message: `✅ Published: ${existing.title}\n🔗 ${profile.liveBase}/${existing.slug}`,
     title: existing.title,
   };
 }
@@ -377,22 +411,24 @@ export function buildDraftEmbeds(title, excerpt, image) {
  * Buttons shown under a draft: Publish, plus Regenerate image when there is an
  * image to replace.
  *
- * Both reference the draft by UUID (`publish:id:<uuid>` = 47 chars,
- * `regenimg:id:<uuid>` = 48). Slugs here run 68-106 chars and breached Discord's
- * 100-char custom_id cap on 7 of 18 real posts, which silently dropped the
- * button on exactly the long-titled posts.
+ * Both reference the draft by UUID, prefixed with the content line so the
+ * click routes back to the right table (`publish:digital:id:<uuid>` = 55
+ * chars, `regenimg:digital:id:<uuid>` = 56 — still well inside Discord's
+ * 100-char custom_id cap, which real Academy titles already brushed against
+ * before draft-id references replaced raw slugs).
  *
  * @param {string} draftId Post UUID
  * @param {string|null} image Current image URL, if any
+ * @param {import('./profiles.js').SiteProfile} [profile] Defaults to Academy, matching every pre-existing caller
  * @returns {object[]} Action rows
  */
-export function buildDraftComponents(draftId, image) {
+export function buildDraftComponents(draftId, image, profile = getProfile('academy')) {
   const buttons = [
     {
       type: 2, // BUTTON
       style: 3, // SUCCESS (green) — distinct from the blue Generate buttons
       label: 'Publish',
-      custom_id: `publish:id:${draftId}`,
+      custom_id: `publish:${profile.key}:id:${draftId}`,
     },
   ];
 
@@ -403,16 +439,16 @@ export function buildDraftComponents(draftId, image) {
       type: 2,
       style: 2, // SECONDARY (grey) — deliberately less prominent than Publish
       label: 'Regenerate image',
-      custom_id: `regenimg:id:${draftId}`,
+      custom_id: `regenimg:${profile.key}:id:${draftId}`,
     });
   }
 
   return [{ type: 1, components: buttons }]; // ACTION_ROW
 }
 
-async function handleGenerateDeferred(interaction, topicInput) {
+async function handleGenerateDeferred(interaction, topicInput, profile = getProfile('academy')) {
   try {
-    const { draftId, slug, title, excerpt, image } = await runGenerate(topicInput);
+    const { draftId, slug, title, excerpt, image } = await runGenerate(topicInput, profile);
     const preview = (excerpt || '').slice(0, 300);
     // With an embed the title and excerpt are shown there, so the message body
     // is kept to the operational detail rather than repeating itself.
@@ -433,7 +469,7 @@ async function handleGenerateDeferred(interaction, topicInput) {
     // 7 of 18 real posts — silently dropping the button on exactly the
     // long-titled posts, with nothing to explain why. The guard below is kept
     // as a backstop but can no longer fire.
-    const components = buildDraftComponents(draftId, image);
+    const components = buildDraftComponents(draftId, image, profile);
 
     await editOriginalResponse(interaction, content, components, buildDraftEmbeds(title, excerpt, image));
   } catch (err) {
@@ -456,16 +492,16 @@ async function handleGenerateDeferred(interaction, topicInput) {
  *
  * Drafts only; regenerateImageForDraft() refuses published posts.
  */
-async function handleRegenerateImageDeferred(interaction, ref) {
+async function handleRegenerateImageDeferred(interaction, ref, profile = getProfile('academy')) {
   const draftId = String(ref || '').replace(/^id:/, '').trim();
   try {
-    const { url, title, slug, excerpt } = await regenerateImageForDraft(draftId);
+    const { url, title, slug, excerpt } = await regenerateImageForDraft(draftId, profile);
     const content =
       `Image regenerated — review it below.\nSlug: \`${slug}\`\n${appUrl()}/dashboard.html`;
     await editOriginalResponse(
       interaction,
       content,
-      buildDraftComponents(draftId, url),
+      buildDraftComponents(draftId, url, profile),
       buildDraftEmbeds(title, excerpt, url)
     );
   } catch (err) {
@@ -474,9 +510,9 @@ async function handleRegenerateImageDeferred(interaction, ref) {
   }
 }
 
-async function handlePublishDeferred(interaction, slug) {
+async function handlePublishDeferred(interaction, ref, profile = getProfile('academy')) {
   try {
-    const result = await runPublish(slug);
+    const result = await runPublish(ref, profile);
     await editOriginalResponse(interaction, result.message);
   } catch (err) {
     console.warn('[discord] Publish failed:', err.message);
@@ -486,10 +522,13 @@ async function handlePublishDeferred(interaction, slug) {
 
 // Button path for generate: resolve the custom_id payload to a topic first, so a
 // stale button reports honestly instead of silently drafting the wrong topic.
+// The payload carries the content line (see parseLinePayload) so the draft
+// lands in the right table.
 async function handleGenerateFromRef(interaction, payload) {
+  const { profile, ref } = parseLinePayload(payload);
   let topic;
   try {
-    topic = await resolveTopicRef(payload);
+    topic = await resolveTopicRef(ref, profile);
   } catch (err) {
     console.warn('[discord] Topic reference lookup failed:', err.message);
     await editOriginalResponse(interaction, friendlyError('🔍 Couldn’t track down that topic.', err));
@@ -502,13 +541,13 @@ async function handleGenerateFromRef(interaction, payload) {
     );
     return;
   }
-  await handleGenerateDeferred(interaction, topic);
+  await handleGenerateDeferred(interaction, topic, profile);
 }
 
-async function handleTopicsDeferred(interaction) {
+async function handleTopicsDeferred(interaction, profile = getProfile('academy')) {
   try {
-    const topics = await getSelectedTopics({ forceFresh: false });
-    await editOriginalResponse(interaction, formatTopicsMessage(topics));
+    const topics = await getSelectedTopics({ forceFresh: false, profile });
+    await editOriginalResponse(interaction, formatTopicsMessage(topics, profile));
   } catch (err) {
     console.warn('[discord] Topics failed:', err.message);
     await editOriginalResponse(interaction, friendlyError('📋 Couldn’t pull up the topics list.', err));
@@ -576,11 +615,17 @@ export function registerDiscordRoutes(app) {
       if (interaction.type === InteractionType.APPLICATION_COMMAND) {
         const name = interaction.data && interaction.data.name;
 
+        // Optional `line` option on /topics and /generate (Academy | Digital),
+        // resolved via getProfile() which defaults to Academy when omitted —
+        // so every pre-existing invocation with no `line` behaves unchanged.
+        const line = getOption(interaction, 'line');
+        const profile = getProfile(line);
+
         if (name === 'topics') {
           // Read-only: no allow-list required. Defer (a cache miss can call
           // Claude and exceed the 3s window), then edit with the result.
           defer(res, false);
-          keepAlive(handleTopicsDeferred(interaction));
+          keepAlive(handleTopicsDeferred(interaction, profile));
           return;
         }
 
@@ -591,7 +636,7 @@ export function registerDiscordRoutes(app) {
           const topic = getOption(interaction, 'topic');
           if (!topic) return ephemeral(res, 'Please provide a `topic`.');
           defer(res, false); // public: visible to the whole channel
-          keepAlive(handleGenerateDeferred(interaction, topic));
+          keepAlive(handleGenerateDeferred(interaction, topic, profile));
           return;
         }
 
@@ -602,7 +647,7 @@ export function registerDiscordRoutes(app) {
           const slug = getOption(interaction, 'slug');
           if (!slug) return ephemeral(res, 'Please provide a `slug`.');
           defer(res, false); // public: visible to the whole channel
-          keepAlive(handlePublishDeferred(interaction, slug));
+          keepAlive(handlePublishDeferred(interaction, slug, profile));
           return;
         }
 
@@ -612,7 +657,11 @@ export function registerDiscordRoutes(app) {
       // ---- Message component (button) interactions -----------------------
       // Buttons must carry a custom_id of the form "generate:<topic>" or
       // "publish:<slug>" so a click reuses the exact same logic as the slash
-      // commands (no duplicated business logic).
+      // commands (no duplicated business logic). Since the second Discord
+      // integration was added, the payload after the action may ALSO carry a
+      // leading content-line segment ("digital:id:<uuid>") — parseLinePayload()
+      // strips and resolves that, falling back to Academy for any payload
+      // that predates this (every button already posted in Discord).
       if (interaction.type === InteractionType.MESSAGE_COMPONENT) {
         const customId = (interaction.data && interaction.data.custom_id) || '';
         const sep = customId.indexOf(':');
@@ -635,7 +684,8 @@ export function registerDiscordRoutes(app) {
           }
           if (!payload) return ephemeral(res, 'This button is missing a slug.');
           defer(res, false); // public: visible to the whole channel
-          keepAlive(handlePublishDeferred(interaction, payload));
+          const { profile, ref } = parseLinePayload(payload);
+          keepAlive(handlePublishDeferred(interaction, ref, profile));
           return;
         }
 
@@ -647,7 +697,8 @@ export function registerDiscordRoutes(app) {
           }
           if (!payload) return ephemeral(res, 'This button is missing a draft reference.');
           defer(res, false); // public: visible to the whole channel
-          keepAlive(handleRegenerateImageDeferred(interaction, payload));
+          const { profile, ref } = parseLinePayload(payload);
+          keepAlive(handleRegenerateImageDeferred(interaction, ref, profile));
           return;
         }
 

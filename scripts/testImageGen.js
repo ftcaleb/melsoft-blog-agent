@@ -220,8 +220,11 @@ check('THE CUSTOM_ID REGRESSION: buttons survive the longest real slug', () => {
 check('button custom_ids route to the handlers that exist', () => {
   const rows = buildDraftComponents(UUID, 'https://example.com/a.jpg');
   const ids = rows[0].components.map((b) => b.custom_id);
-  assert(ids[0] === `publish:id:${UUID}`, `unexpected publish id: ${ids[0]}`);
-  assert(ids[1] === `regenimg:id:${UUID}`, `unexpected regenerate id: ${ids[1]}`);
+  // Line-prefixed since the Melsoft Digital content line was added — defaults
+  // to 'academy' when buildDraftComponents() is called without a profile, so
+  // every pre-existing (Academy-only) call site is unaffected in substance.
+  assert(ids[0] === `publish:academy:id:${UUID}`, `unexpected publish id: ${ids[0]}`);
+  assert(ids[1] === `regenimg:academy:id:${UUID}`, `unexpected regenerate id: ${ids[1]}`);
 });
 
 console.log('\n--- failure paths ---');

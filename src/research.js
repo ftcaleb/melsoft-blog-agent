@@ -8,6 +8,7 @@ import dotenv from 'dotenv';
 import { logAnthropicUsage } from './usage.js';
 import { supabase } from './supabaseClient.js';
 import { notifyFailure } from './notify.js';
+import { getProfile } from './profiles.js';
 
 // Load environment variables
 dotenv.config();
@@ -26,7 +27,10 @@ const getProjectPath = (relPath) => path.resolve(__dirname, '..', relPath);
 // by the scheduled cron (Tue/Fri) plus an explicit ?fresh=true bypass, so
 // ordinary page loads read the cache and never trigger a billed research call.
 const RESEARCH_CACHE_TABLE = 'research_cache';
-const RESEARCH_CACHE_ROW_ID = 1;
+// Each content line gets its own cache row so their candidate batches never
+// clobber each other. Academy keeps its original row id (1) for a no-op
+// migration; Digital gets a new row.
+const RESEARCH_CACHE_ROW_IDS = { academy: 1, digital: 2 };
 
 /**
  * Calculates the Levenshtein distance between two strings.
@@ -88,33 +92,39 @@ function isFuzzyMatch(title1, title2) {
 // Discord posted topics named "undefined" with buttons that resolved to nothing.
 // ---------------------------------------------------------------------------
 
-// Frozen module-level constant so the API's schema-compilation cache is hit.
-const CANDIDATES_JSON_SCHEMA = {
-  type: 'object',
-  properties: {
-    candidates: {
-      type: 'array',
-      items: {
-        type: 'object',
-        properties: {
-          title: { type: 'string' },
-          pitch: { type: 'string' },
-          pillar: { type: 'string', enum: ['tech', 'skills'] },
-          type: { type: 'string' },
-          sourceNotes: { type: 'string' },
+// Builds the candidates schema for a profile's category set. Kept as a plain
+// function (not a frozen constant) since the enum now varies per profile —
+// the API's 24h schema-compilation cache is still hit per distinct schema
+// shape, just no longer per-process-wide singleton.
+function candidatesJsonSchema(categories) {
+  return {
+    type: 'object',
+    properties: {
+      candidates: {
+        type: 'array',
+        items: {
+          type: 'object',
+          properties: {
+            title: { type: 'string' },
+            pitch: { type: 'string' },
+            pillar: { type: 'string', enum: categories },
+            type: { type: 'string' },
+            sourceNotes: { type: 'string' },
+          },
+          required: ['title', 'pitch', 'pillar', 'type', 'sourceNotes'],
+          additionalProperties: false,
         },
-        required: ['title', 'pitch', 'pillar', 'type', 'sourceNotes'],
-        additionalProperties: false,
       },
     },
-  },
-  required: ['candidates'],
-  additionalProperties: false,
-};
+    required: ['candidates'],
+    additionalProperties: false,
+  };
+}
 
 // Cleared if the API ever rejects output_config; the parser below is fully
-// capable without it, so this degrades rather than breaks.
-let structuredOutputSupported = true;
+// capable without it, so this degrades rather than breaks. Tracked per
+// profile since a rejection for one line says nothing about the other.
+const structuredOutputSupported = { academy: true, digital: true };
 
 /**
  * Scans for balanced JSON object/array substrings, honouring string literals and
@@ -165,19 +175,24 @@ function extractJsonValues(raw, limit = 200) {
  * Normalizes one raw candidate, or returns null if it is unusable.
  * Forgiving where it safely can be (case, missing optional prose) and strict on
  * the two fields the pipeline genuinely depends on: a real title and a pillar
- * that select.js can route.
+ * that matches one of this profile's categories.
  *
  * @param {*} value
+ * @param {string[]} categories Valid pillar/category values for the active profile
  * @returns {object|null}
  */
-function normalizeCandidate(value) {
+function normalizeCandidate(value, categories) {
   if (!value || typeof value !== 'object' || Array.isArray(value)) return null;
 
   const title = typeof value.title === 'string' ? value.title.trim() : '';
   if (title.length < 8) return null;
 
-  const pillar = String(value.pillar || '').trim().toLowerCase();
-  if (pillar !== 'tech' && pillar !== 'skills') return null;
+  // Case-insensitive match, but the CANONICAL casing from the profile's
+  // category list is what gets stored — 'ai' from the model normalizes to
+  // 'AI' for Digital, matching profiles.js and select.js exactly.
+  const raw = String(value.pillar || '').trim().toLowerCase();
+  const pillar = categories.find((c) => c.toLowerCase() === raw);
+  if (!pillar) return null;
 
   return {
     title,
@@ -194,9 +209,10 @@ function normalizeCandidate(value) {
  * what an unconstrained fallback response still produces).
  *
  * @param {*} parsed
+ * @param {string[]} categories Valid pillar/category values for the active profile
  * @returns {object[]} Valid, normalized candidates (possibly empty)
  */
-function normalizeCandidateList(parsed) {
+function normalizeCandidateList(parsed, categories) {
   let list = null;
   if (Array.isArray(parsed)) list = parsed;
   else if (parsed && typeof parsed === 'object' && Array.isArray(parsed.candidates)) list = parsed.candidates;
@@ -207,7 +223,7 @@ function normalizeCandidateList(parsed) {
   // of discarding the whole batch.
   const flat = list.some(Array.isArray) ? list.flat() : list;
 
-  return flat.map(normalizeCandidate).filter(Boolean);
+  return flat.map((v) => normalizeCandidate(v, categories)).filter(Boolean);
 }
 
 /**
@@ -220,9 +236,10 @@ function normalizeCandidateList(parsed) {
  * candidate to be accepted.
  *
  * @param {object[]} content response.content
+ * @param {string[]} [categories] Valid pillar/category values; defaults to Academy's for backward compatibility
  * @returns {object[]} Valid, normalized candidates (empty if none found)
  */
-export function parseCandidatesResponse(content) {
+export function parseCandidatesResponse(content, categories = getProfile('academy').categories) {
   const textBlocks = (Array.isArray(content) ? content : [])
     .filter((block) => block && block.type === 'text' && typeof block.text === 'string')
     .map((block) => block.text.replace(/<\/?cite\b[^>]*>/gi, '').trim())
@@ -245,7 +262,7 @@ export function parseCandidatesResponse(content) {
         } catch {
           continue;
         }
-        const list = normalizeCandidateList(parsed);
+        const list = normalizeCandidateList(parsed, categories);
         if (list.length) return list;
       }
     }
@@ -265,9 +282,10 @@ export function parseCandidatesResponse(content) {
  * trending candidate topics. This is the expensive operation the cache exists
  * to avoid. Throws on a hard API/parse failure so callers don't cache garbage.
  *
+ * @param {import('./profiles.js').SiteProfile} profile
  * @returns {Promise<Array>} Array of recent candidate topic objects (non-empty)
  */
-export async function fetchRecentCandidates() {
+export async function fetchRecentCandidates(profile = getProfile('academy')) {
   const apiKey = process.env.ANTHROPIC_API_KEY;
   if (!apiKey) {
     console.warn('Warning: ANTHROPIC_API_KEY is not defined in process.env. Skipping recent candidates generation.');
@@ -280,9 +298,11 @@ export async function fetchRecentCandidates() {
   // them to the model so it doesn't re-discover the same story in new wording
   // (the downstream string filter only catches near-literal re-proposals).
   // Never crash research if Supabase is unreachable — warn and skip exclusion.
+  // Scoped to THIS profile's table, so Academy and Digital never suppress each
+  // other's topics.
   let excludedSection = '';
   const { data: coveredRows, error: coveredErr } = await supabase
-    .from('posts')
+    .from(profile.table)
     .select('title')
     .order('created_at', { ascending: false });
   if (coveredErr) {
@@ -299,24 +319,17 @@ ${excludedTitles.map(t => `    - ${t}`).join('\n')}
     }
   }
 
-  const promptText = `
-    You are a research agent for Melsoft Academy, a South African training provider.
-
-    Using the web_search tool, find what's trending in South Africa in the last ~2 weeks across these topics ONLY:
-    - AI, cybersecurity, data science (tech pillar)
-    - learnerships, B-BBEE, SETA landscape, employment equity targets, QCTO qualifications, youth upskilling (skills pillar)
-
-    Based on your findings, formulate a list of trending candidate blog post topics for Melsoft Academy.
+  const promptText = `${profile.researchPrompt}
 ${excludedSection}
     CRITICAL REQUIREMENTS:
-    1. Every candidate must have BOTH a South African angle and an educational "what it means / what to do" angle (practical value/insights for learners, companies, or the local community), not just reporting "what happened".
+    1. Every candidate must have a clear "what it means / why it matters" angle for the reader, not just reporting "what happened".
     2. Return ONLY a single valid JSON object with a "candidates" array.
     3. Do NOT include markdown code fences (like \`\`\`json), preamble, explanations, postscript, self-review, or revised versions of the list. Return the list once.
     4. Each entry in "candidates" must match this exact shape:
     {
       "title": "string",
       "pitch": "string (one-line description of the angle)",
-      "pillar": "tech" or "skills",
+      "pillar": ${profile.categories.map((c) => `"${c}"`).join(' or ')},
       "type": "recent",
       "sourceNotes": "string (details of the source or URL found)"
     }
@@ -332,7 +345,7 @@ ${excludedSection}
   };
 
   let response;
-  if (!structuredOutputSupported) {
+  if (!structuredOutputSupported[profile.key]) {
     response = await anthropic.messages.create(baseParams);
   } else {
     try {
@@ -341,7 +354,7 @@ ${excludedSection}
         // Grammar-constrains decoding, so the model cannot emit commentary or a
         // second revised list alongside the candidates. Verified against the live
         // API to work alongside the server-side web_search tool on this model.
-        output_config: { format: { type: 'json_schema', schema: CANDIDATES_JSON_SCHEMA } },
+        output_config: { format: { type: 'json_schema', schema: candidatesJsonSchema(profile.categories) } },
       });
     } catch (err) {
       const rejectedSchema =
@@ -349,14 +362,14 @@ ${excludedSection}
         /output_config|json_schema|output_format/i.test(String(err.message || ''));
       if (!rejectedSchema) throw err;
       console.warn('[research] API rejected output_config — falling back to unconstrained output for this process.');
-      structuredOutputSupported = false;
+      structuredOutputSupported[profile.key] = false;
       response = await anthropic.messages.create(baseParams);
     }
   }
 
   logAnthropicUsage('research', response);
 
-  const recentCandidates = parseCandidatesResponse(response.content);
+  const recentCandidates = parseCandidatesResponse(response.content, profile.categories);
 
   if (!recentCandidates.length) {
     // Throw rather than return [] so callers never cache an empty batch over a
@@ -373,21 +386,22 @@ ${excludedSection}
 
 /**
  * Forces a live regeneration of the recent-candidates cache and persists it to
- * the Supabase research_cache row. Called by the Tue/Fri cron
+ * this profile's Supabase research_cache row. Called by the daily cron
  * (/api/cron/refresh-topics) and on an explicit ?fresh=true bypass.
  *
+ * @param {import('./profiles.js').SiteProfile} profile
  * @returns {Promise<Array>} The freshly fetched recent candidates
  */
-export async function refreshResearchCache() {
-  const candidates = await fetchRecentCandidates();
+export async function refreshResearchCache(profile = getProfile('academy')) {
+  const candidates = await fetchRecentCandidates(profile);
   const generatedAt = new Date().toISOString();
 
   try {
     const { error } = await supabase
       .from(RESEARCH_CACHE_TABLE)
-      .upsert({ id: RESEARCH_CACHE_ROW_ID, generated_at: generatedAt, candidates });
+      .upsert({ id: RESEARCH_CACHE_ROW_IDS[profile.key] || 1, generated_at: generatedAt, candidates });
     if (error) throw error;
-    console.log(`[research] Cache REFRESHED in Supabase — ${candidates.length} recent candidates at ${generatedAt}.`);
+    console.log(`[research] Cache REFRESHED in Supabase (${profile.key}) — ${candidates.length} recent candidates at ${generatedAt}.`);
   } catch (writeErr) {
     // Non-fatal: we still return the candidates for this run. This also covers
     // the case where the research_cache table has not been created yet.
@@ -405,10 +419,10 @@ export async function refreshResearchCache() {
  *   - process.env.DISABLE_RESEARCH_CACHE === 'true', or
  *   - an empty/absent cache (first run, or before the table exists).
  *
- * @param {{ forceFresh?: boolean }} options
+ * @param {{ forceFresh?: boolean, profile?: import('./profiles.js').SiteProfile }} options
  * @returns {Promise<Array>} Array of recent candidate topic objects
  */
-export async function getRecentCandidatesCached({ forceFresh = false } = {}) {
+export async function getRecentCandidatesCached({ forceFresh = false, profile = getProfile('academy') } = {}) {
   const bypass = forceFresh || process.env.DISABLE_RESEARCH_CACHE === 'true';
 
   // Load the cached row from Supabase (may not exist yet / table may be absent).
@@ -416,7 +430,7 @@ export async function getRecentCandidatesCached({ forceFresh = false } = {}) {
   const { data, error } = await supabase
     .from(RESEARCH_CACHE_TABLE)
     .select('generated_at, candidates')
-    .eq('id', RESEARCH_CACHE_ROW_ID)
+    .eq('id', RESEARCH_CACHE_ROW_IDS[profile.key] || 1)
     .maybeSingle();
   if (error) {
     console.warn('[research] Could not read research cache from Supabase (will regenerate):', error.message);
@@ -429,19 +443,19 @@ export async function getRecentCandidatesCached({ forceFresh = false } = {}) {
     const ageMin = cache.generated_at
       ? Math.round((Date.now() - new Date(cache.generated_at).getTime()) / 60000)
       : null;
-    console.log(`[research] Cache HIT — ${cache.candidates.length} recent candidates${ageMin != null ? ` (age ${ageMin} min)` : ''}.`);
+    console.log(`[research] Cache HIT (${profile.key}) — ${cache.candidates.length} recent candidates${ageMin != null ? ` (age ${ageMin} min)` : ''}.`);
     return cache.candidates;
   }
 
   if (bypass) {
     const reason = forceFresh ? 'fresh=true query param' : 'DISABLE_RESEARCH_CACHE=true';
-    console.log(`[research] Cache BYPASS — forcing live regeneration (${reason}).`);
+    console.log(`[research] Cache BYPASS (${profile.key}) — forcing live regeneration (${reason}).`);
   } else {
-    console.log('[research] Cache MISS — no cached candidates, regenerating.');
+    console.log(`[research] Cache MISS (${profile.key}) — no cached candidates, regenerating.`);
   }
 
   try {
-    return await refreshResearchCache();
+    return await refreshResearchCache(profile);
   } catch (regenErr) {
     // Live regeneration failed — fall back to whatever cache we have rather than
     // silently dropping all recent topics.
@@ -452,7 +466,7 @@ export async function getRecentCandidatesCached({ forceFresh = false } = {}) {
     // Non-blocking — the fallback must happen regardless.
     const fellBackToCache = !!(cache && Array.isArray(cache.candidates));
     await notifyFailure(
-      'Topic research',
+      `Topic research (${profile.label})`,
       fellBackToCache
         ? 'Live regeneration failed; serving the previous cached topics. The cache was NOT overwritten.'
         : 'Live regeneration failed and no cache was available — no recent topics this run.',
@@ -469,42 +483,44 @@ export async function getRecentCandidatesCached({ forceFresh = false } = {}) {
 }
 
 /**
- * Produces a list of candidate blog topics for Melsoft Academy.
- * Combines recent web-searched trends in South Africa with evergreen topics.
- * The expensive recent-trends search is served from a 24h cache; evergreen
- * topics and dedup against the Supabase posts table always run fresh, so
+ * Produces a list of candidate blog topics for the given content line.
+ * Combines recent web-searched trends with evergreen topics (Academy only —
+ * Digital has no evergreen bank yet, being pure news/commentary). The
+ * expensive recent-trends search is served from a 24h cache; evergreen topics
+ * and dedup against this profile's Supabase table always run fresh, so
  * newly-saved posts (even drafts still in review) are excluded immediately.
  *
- * @param {{ forceFresh?: boolean }} options Pass forceFresh to bypass the cache
+ * @param {{ forceFresh?: boolean, profile?: import('./profiles.js').SiteProfile }} options Pass forceFresh to bypass the cache
  * @returns {Promise<Array>} List of candidate topic objects
  */
-export async function generateCandidates({ forceFresh = false } = {}) {
-  const evergreenPath = getProjectPath('data/evergreen_topics.json');
-
-  // 1. Read evergreen topics
+export async function generateCandidates({ forceFresh = false, profile = getProfile('academy') } = {}) {
+  // 1. Read evergreen topics — Academy only.
   let evergreenCandidates = [];
-  try {
-    const evergreenRaw = await fs.readFile(evergreenPath, 'utf8');
-    const evergreenTopics = JSON.parse(evergreenRaw);
-    evergreenCandidates = evergreenTopics.map(topic => ({
-      title: topic.title,
-      pitch: topic.pitch,
-      pillar: topic.pillar,
-      cluster: topic.cluster, // carry the hand-tagged cluster through to the writer
-      type: 'evergreen',
-      sourceNotes: 'evergreen bank'
-    }));
-  } catch (error) {
-    console.warn('Warning: Could not read evergreen_topics.json. Defaulting to empty.', error.message);
+  if (profile.key === 'academy') {
+    const evergreenPath = getProjectPath('data/evergreen_topics.json');
+    try {
+      const evergreenRaw = await fs.readFile(evergreenPath, 'utf8');
+      const evergreenTopics = JSON.parse(evergreenRaw);
+      evergreenCandidates = evergreenTopics.map(topic => ({
+        title: topic.title,
+        pitch: topic.pitch,
+        pillar: topic.pillar,
+        cluster: topic.cluster, // carry the hand-tagged cluster through to the writer
+        type: 'evergreen',
+        sourceNotes: 'evergreen bank'
+      }));
+    } catch (error) {
+      console.warn('Warning: Could not read evergreen_topics.json. Defaulting to empty.', error.message);
+    }
   }
 
-  // 2. Fetch past posts from Supabase for deduping.
+  // 2. Fetch past posts from THIS profile's table for deduping.
   // We pull EVERY row regardless of status — a draft still in review already
   // "covers" its topic, so it should suppress re-proposals. If Supabase is
   // unreachable, research must degrade gracefully rather than crash, so we
   // warn and continue with an empty past list.
   let pastPosts = [];
-  const { data, error } = await supabase.from('posts').select('title, source_topic');
+  const { data, error } = await supabase.from(profile.table).select('title, source_topic');
   if (error) {
     console.warn('Warning: Could not fetch past posts from Supabase for deduping. Continuing with an empty past list.', error.message);
   } else if (Array.isArray(data)) {
@@ -512,7 +528,7 @@ export async function generateCandidates({ forceFresh = false } = {}) {
   }
 
   // 3. Fetch recent trending candidates (served from the 24h cache unless bypassed)
-  const recentCandidates = await getRecentCandidatesCached({ forceFresh });
+  const recentCandidates = await getRecentCandidatesCached({ forceFresh, profile });
 
   // 4. Combine recent and evergreen candidates
   const allCandidates = [...recentCandidates, ...evergreenCandidates];

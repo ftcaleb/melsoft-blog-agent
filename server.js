@@ -3,13 +3,14 @@ import dotenv from 'dotenv';
 import path from 'path';
 import { fileURLToPath } from 'url';
 import { generateCandidates, refreshResearchCache } from './src/research.js';
-import { selectTopics, selectTopicsForPillar, pillarForDate } from './src/select.js';
+import { selectTopics, selectTopicsForPillar, selectTopicsForDigital, pillarForDate } from './src/select.js';
 import { writePost, PostValidationError, formatPostDate } from './src/writer.js';
 import { supabase } from './src/supabaseClient.js';
 import { markdownToBlocks, computeReadTime } from './src/markdownToBlocks.js';
 import { registerDiscordRoutes, topicHash } from './src/discordInteractions.js';
 import { notifyDiscord, notifyFailure } from './src/notify.js';
 import { generateFeaturedImageSafe, regenerateImageForDraft, ImageGenerationError } from './src/imageGen.js';
+import { getProfile } from './src/profiles.js';
 
 // Re-exported for backwards compatibility: scripts/testDiscordNotify.js imports
 // notifyDiscord from here. The implementation now lives in src/notify.js so
@@ -85,7 +86,12 @@ const DISCORD_MAX_BUTTON_ROWS = 5; // max action rows in one message
 // every button (only a title <= 91 chars survived). A hash is always ~19 chars,
 // so every button renders — and unlike an index it can never resolve to a
 // different topic if the topic list is refreshed before someone clicks.
-export function buildTopicButtons(candidates) {
+//
+// `line` is embedded so the click routes to the right content line/table (see
+// parseLinePayload in discordInteractions.js) — always encoded explicitly here
+// (even for 'academy') rather than relying on that function's no-prefix
+// default, so every NEWLY posted button is unambiguous.
+export function buildTopicButtons(candidates, line = 'academy') {
   const rows = [];
   let current = null;
   const skipped = [];
@@ -94,7 +100,7 @@ export function buildTopicButtons(candidates) {
     const title = String(candidates[i] && candidates[i].title || '').trim();
     if (!title) continue;
 
-    const customId = `generate:h:${topicHash(title)}`;
+    const customId = `generate:${line}:h:${topicHash(title)}`;
     if (customId.length > DISCORD_CUSTOM_ID_MAX) {
       skipped.push(i + 1); // unreachable in practice; kept as a guard
       continue;
@@ -125,53 +131,90 @@ export function buildTopicButtons(candidates) {
 // requests — NOT the Supabase session — so it is registered BEFORE the
 // requireAuth gate below. It regenerates the recent-topics research, stores it
 // in Supabase (nothing is written to the posts table), and pings Discord.
+//
+// One route serves BOTH content lines: Digital gets its own vercel.json cron
+// entry pointing here with ?profile=digital on its own schedule, independent
+// of Academy's weekday rotation. Omitting the param (Academy's existing cron
+// entry) behaves exactly as before this feature existed.
 app.get('/api/cron/refresh-topics', async (req, res) => {
   const secret = process.env.CRON_SECRET;
   const auth = req.headers.authorization || '';
   if (!secret || auth !== `Bearer ${secret}`) {
     return res.status(401).json({ error: 'Unauthorized' });
   }
+  const profile = getProfile(req.query.profile);
   try {
-    console.log('[cron] Refreshing research cache...');
-    const candidates = await refreshResearchCache();
-    console.log(`[cron] Research cache refreshed: ${candidates.length} candidates.`);
+    console.log(`[cron] Refreshing research cache (${profile.key})...`);
+    const candidates = await refreshResearchCache(profile);
+    console.log(`[cron] Research cache refreshed (${profile.key}): ${candidates.length} candidates.`);
 
-    // Notify Discord with the SAME three topics the dashboard would show —
-    // selectTopics() applies the fixed 2 tech + 1 skills rule — rather than the
-    // raw candidate list. Each of the three gets a "Generate #N" button whose
-    // numbering matches the list. Non-fatal: any failure here is logged, and the
-    // cache refresh above still counts as a success.
+    // Notify Discord with the SAME topics the dashboard/Discord /topics would
+    // show, not the raw candidate list. Each gets a "Generate #N" button whose
+    // numbering matches the list. Non-fatal: any failure here is logged, and
+    // the cache refresh above still counts as a success.
     const appUrl = process.env.APP_URL || 'https://melsoft-blog.vercel.app';
 
-    // One post a day, 5 a week: the weekday decides the pillar (3 skills + 2
-    // tech per week). Off-schedule manual runs (weekends) fall back to skills,
-    // the majority pillar, so a manual trigger still produces useful options.
-    const now = new Date();
-    const scheduled = pillarForDate(now);
-    const targetPillar = scheduled || 'skills';
-    const dayName = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'][now.getUTCDay()];
-    const pillarLabel = targetPillar === 'skills' ? 'SKILLS DEVELOPMENT' : 'TECH';
-
     let selected = [];
-    if (candidates.length) {
-      try {
-        // Re-read through generateCandidates so evergreen topics and the
-        // already-covered dedup are applied, exactly like GET /api/topics.
-        const pool = await generateCandidates({ forceFresh: false });
-        selected = selectTopicsForPillar(pool, targetPillar, 3);
-      } catch (selErr) {
-        console.warn(`[cron] Could not select ${targetPillar} topics:`, selErr.message);
+    let dayName, pillarLabel, targetPillar; // Academy-only labelling, used below
+
+    if (profile.key === 'digital') {
+      // No weekday pillar rotation for Digital — it's news/commentary, so
+      // "freshest across both categories" is the whole selection rule.
+      if (candidates.length) {
+        try {
+          const pool = await generateCandidates({ forceFresh: false, profile });
+          selected = selectTopicsForDigital(pool, 3);
+        } catch (selErr) {
+          console.warn('[cron] Could not select Digital topics:', selErr.message);
+        }
       }
+      console.log(`[cron] Digital run; offering ${selected.length} topic(s).`);
+    } else {
+      // One post a day, 5 a week: the weekday decides the pillar (3 skills + 2
+      // tech per week). Off-schedule manual runs (weekends) fall back to skills,
+      // the majority pillar, so a manual trigger still produces useful options.
+      const now = new Date();
+      const scheduled = pillarForDate(now);
+      targetPillar = scheduled || 'skills';
+      dayName = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'][now.getUTCDay()];
+      pillarLabel = targetPillar === 'skills' ? 'SKILLS DEVELOPMENT' : 'TECH';
+
+      if (candidates.length) {
+        try {
+          // Re-read through generateCandidates so evergreen topics and the
+          // already-covered dedup are applied, exactly like GET /api/topics.
+          const pool = await generateCandidates({ forceFresh: false, profile });
+          selected = selectTopicsForPillar(pool, targetPillar, 3);
+        } catch (selErr) {
+          console.warn(`[cron] Could not select ${targetPillar} topics:`, selErr.message);
+        }
+      }
+      console.log(`[cron] ${dayName} → ${targetPillar} day; offering ${selected.length} topic(s).`);
     }
-    console.log(`[cron] ${dayName} → ${targetPillar} day; offering ${selected.length} topic(s).`);
 
     let message;
     let buttons;
-    if (selected.length) {
+    if (profile.key === 'digital') {
+      if (selected.length) {
+        const list = selected
+          .map((t, i) => `${i + 1}. \`[${String(t.pillar || '?').toUpperCase()}]\` ${t.title}`)
+          .join('\n');
+        buttons = buildTopicButtons(selected, profile.key);
+        message =
+          `🔔 **Melsoft Digital — new topics**\n\n` +
+          `👉 **Open the blog agent:** ${appUrl}\n\n${list}\n\n` +
+          `🖱️ Tap a button below to draft that topic here in Discord.`;
+      } else {
+        message =
+          `🔔 **Melsoft Digital — new topics**\n\n` +
+          `Topic research ran but no topics were available today.\n\n` +
+          `👉 **Open the blog agent:** ${appUrl}`;
+      }
+    } else if (selected.length) {
       const list = selected
         .map((t, i) => `${i + 1}. \`[${String(t.type || '?').toUpperCase()}]\` ${t.title}`)
         .join('\n');
-      buttons = buildTopicButtons(selected);
+      buttons = buildTopicButtons(selected, profile.key);
       message =
         `🔔 **${dayName} — ${pillarLabel} day**\n` +
         `_Weekly plan: 3 skills development · 2 tech (one post per weekday)._\n\n` +
@@ -188,7 +231,7 @@ app.get('/api/cron/refresh-topics', async (req, res) => {
     // noticing the day's topics are ready.
     await notifyDiscord(message, buttons, { mention: true });
 
-    return res.json({ ok: true, refreshedAt: new Date().toISOString(), count: candidates.length });
+    return res.json({ ok: true, profile: profile.key, refreshedAt: new Date().toISOString(), count: candidates.length });
   } catch (err) {
     console.error('[cron] Refresh failed:', err);
     // The cron calls refreshResearchCache() directly, so a failure here bypasses
@@ -196,7 +239,7 @@ app.get('/api/cron/refresh-topics', async (req, res) => {
     // Without this, an unattended cron failure would be a silent 500 — exactly
     // the blind spot that let the original incident reach the live site.
     await notifyFailure(
-      'Scheduled topic research',
+      `Scheduled topic research (${profile.label})`,
       'The cron refresh failed. The existing cached topics were NOT overwritten.',
       [err.message]
     );
@@ -209,41 +252,49 @@ app.use('/api', requireAuth);
 // In-flight lock: coalesces concurrent/rapid /api/topics requests into a single
 // run so a spammed refresh button (or parallel tabs) can't trigger multiple
 // billed research passes at once. All callers awaiting during a run get the
-// same result.
-let topicsInFlight = null;
+// same result. Keyed per content line — an Academy request in flight must
+// never hand its result to a concurrent Digital request.
+const topicsInFlight = { academy: null, digital: null };
 
-// API endpoint to retrieve the 3 selected blog topic candidates.
+// API endpoint to retrieve the selected blog topic candidates.
 // Pass ?fresh=true to bypass the 24h research cache and force live regeneration.
+// Pass ?profile=digital for Melsoft Digital's line; omit for Academy (default,
+// unchanged from before this line existed).
 app.get('/api/topics', async (req, res) => {
+  let profile = getProfile('academy');
   try {
     const forceFresh = req.query.fresh === 'true';
+    profile = getProfile(req.query.profile);
 
-    if (topicsInFlight) {
-      console.log('[API GET /api/topics] Request already in flight — coalescing (no extra API call).');
-      const result = await topicsInFlight;
+    if (topicsInFlight[profile.key]) {
+      console.log(`[API GET /api/topics] Request already in flight (${profile.key}) — coalescing (no extra API call).`);
+      const result = await topicsInFlight[profile.key];
       return res.json(result);
     }
 
     // Optional ?pillar=tech|skills targets a single pillar (the daily plan:
     // 3 skills + 2 tech per week). Pass ?pillar=today to follow the weekday
     // schedule. Omit it for the original mixed 2 tech + 1 skills set.
+    // Academy-only — Digital has no weekday pillar rotation.
     const pillarParam = String(req.query.pillar || '').toLowerCase();
-    const targetPillar =
+    const targetPillar = profile.key === 'academy' && (
       pillarParam === 'today' ? (pillarForDate(new Date()) || 'skills')
       : (pillarParam === 'tech' || pillarParam === 'skills') ? pillarParam
-      : null;
+      : null
+    );
 
-    topicsInFlight = (async () => {
-      console.log(`[API GET /api/topics] Generating candidate topics${forceFresh ? ' (forceFresh — bypassing cache)' : ''}...`);
-      const allCandidates = await generateCandidates({ forceFresh });
+    topicsInFlight[profile.key] = (async () => {
+      console.log(`[API GET /api/topics] (${profile.key}) Generating candidate topics${forceFresh ? ' (forceFresh — bypassing cache)' : ''}...`);
+      const allCandidates = await generateCandidates({ forceFresh, profile });
       console.log(`[API GET /api/topics] Total candidates generated: ${allCandidates.length}`);
 
-      console.log(`[API GET /api/topics] Selecting top 3 topics${targetPillar ? ` (${targetPillar} only)` : ''}...`);
-      const selectedTopics = targetPillar
-        ? selectTopicsForPillar(allCandidates, targetPillar, 3)
+      console.log(`[API GET /api/topics] Selecting topics${targetPillar ? ` (${targetPillar} only)` : ''}...`);
+      const selectedTopics =
+        profile.key === 'digital' ? selectTopicsForDigital(allCandidates, 3)
+        : targetPillar ? selectTopicsForPillar(allCandidates, targetPillar, 3)
         : selectTopics(allCandidates);
 
-      console.log('[API GET /api/topics] Successfully selected 3 topics:');
+      console.log('[API GET /api/topics] Successfully selected topics:');
       selectedTopics.forEach((t, i) => {
         console.log(`  ${i + 1}. [${t.pillar.toUpperCase()} | ${t.type.toUpperCase()}] ${t.title}`);
       });
@@ -251,25 +302,28 @@ app.get('/api/topics', async (req, res) => {
       return { topics: selectedTopics };
     })();
 
-    const result = await topicsInFlight;
+    const result = await topicsInFlight[profile.key];
     res.json(result);
   } catch (error) {
     console.error('[API GET /api/topics] Error generating/selecting topics:', error);
     res.status(500).json({ error: 'Failed to generate topics', details: error.message });
   } finally {
-    topicsInFlight = null;
+    topicsInFlight[profile.key] = null;
   }
 });
 
 // API endpoint to approve a selected topic and write the full blog post
 app.post('/api/approve', async (req, res) => {
   try {
-    const { topic } = req.body;
+    const { topic, profile: profileKey, line } = req.body;
     if (!topic || !topic.title) {
       return res.status(400).json({ error: 'Missing or invalid topic parameter' });
     }
+    // Defaults to Academy — every pre-existing caller (the dashboard) sends
+    // neither field, so behaviour is unchanged.
+    const profile = getProfile(profileKey || line);
 
-    console.log(`\n[API POST /api/approve] Writing post for: "${topic.title}"...`);
+    console.log(`\n[API POST /api/approve] (${profile.key}) Writing post for: "${topic.title}"...`);
 
     // The featured image is generated CONCURRENTLY with the article, not after
     // it. Run sequentially the two would routinely exceed Vercel's 60s
@@ -285,9 +339,9 @@ app.post('/api/approve', async (req, res) => {
     // has already been generated and is orphaned in storage. That costs one
     // image and no correctness — the alternative is paying the latency of
     // running them in series on every single request.
-    const imagePromise = generateFeaturedImageSafe(topic);
+    const imagePromise = generateFeaturedImageSafe(topic, profile);
 
-    const post = await writePost(topic);
+    const post = await writePost(topic, profile);
 
     console.log(`[API POST /api/approve] Converting markdown to blocks and computing read time...`);
     const body = markdownToBlocks(post.bodyMarkdown, post.title);
@@ -300,6 +354,9 @@ app.post('/api/approve', async (req, res) => {
         : '[API POST /api/approve] No featured image — saving the draft without one.'
     );
 
+    // Shared fields across both tables. `posts` (Academy) and `blog_posts`
+    // (Digital) diverge from here — see the matching comment in
+    // discordInteractions.js's runGenerate(), which this mirrors exactly.
     const postData = {
       status: 'draft',
       slug: post.slug,
@@ -308,9 +365,7 @@ app.post('/api/approve', async (req, res) => {
       body: body,
       read_time: readTime,
       raw_markdown: post.bodyMarkdown,
-      pillar: post.pillar,
       source_topic: post.sourceTopic,
-      type: post.type,
       image: image ? image.url : null,
       // Display date. Previously left empty and typed by hand for every post,
       // which blocked the dashboard's Publish button on every generated draft
@@ -320,9 +375,18 @@ app.post('/api/approve', async (req, res) => {
       post_date: formatPostDate()
     };
 
-    console.log(`[API POST /api/approve] Inserting draft post into Supabase...`);
+    if (profile.key === 'digital') {
+      postData.category = post.pillar;
+      postData.tint = profile.categoryTint[post.pillar] || null;
+      postData.author = profile.author;
+    } else {
+      postData.pillar = post.pillar;
+      postData.type = post.type;
+    }
+
+    console.log(`[API POST /api/approve] Inserting draft post into Supabase (${profile.table})...`);
     let { data, error } = await supabase
-      .from('posts')
+      .from(profile.table)
       .insert([postData])
       .select()
       .single();
@@ -332,18 +396,18 @@ app.post('/api/approve', async (req, res) => {
       if (error.code === '23505') {
         console.log(`[API POST /api/approve] Duplicate slug detected: "${postData.slug}". Retrying insertion with unique suffix...`);
         postData.slug = post.slug + '-' + Date.now().toString(36).slice(-4);
-        
+
         const retryResult = await supabase
-          .from('posts')
+          .from(profile.table)
           .insert([postData])
           .select()
           .single();
-          
+
         if (retryResult.error) {
           console.error('[API POST /api/approve] Retry insert failed:', retryResult.error);
           return res.status(500).json({ error: 'Failed to save draft', details: retryResult.error.message });
         }
-        
+
         data = retryResult.data;
       } else {
         console.error('[API POST /api/approve] Supabase insert failed:', error);
@@ -354,12 +418,13 @@ app.post('/api/approve', async (req, res) => {
     console.log(`[API POST /api/approve] Draft successfully saved to Supabase (ID: ${data.id}, Slug: ${data.slug})`);
 
     // Persist the topic cluster for per-cluster performance reporting (Deliverable
-    // 6/7). Done as a separate best-effort update so a missing `cluster` column
+    // 6/7). Academy-only — see the matching comment in discordInteractions.js.
+    // Done as a separate best-effort update so a missing `cluster` column
     // (before the one-time ALTER TABLE is run) only warns — it never fails the
     // draft save. Once the column exists this populates automatically.
-    if (post.cluster) {
+    if (profile.key === 'academy' && post.cluster) {
       const { error: clusterErr } = await supabase
-        .from('posts')
+        .from(profile.table)
         .update({ cluster: post.cluster })
         .eq('id', data.id);
       if (clusterErr) {

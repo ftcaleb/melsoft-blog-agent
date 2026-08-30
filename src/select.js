@@ -176,6 +176,39 @@ export function selectTopics(candidates) {
   return finalSelection;
 }
 
+/**
+ * Selects up to `count` topics for Melsoft Digital's line: simply the
+ * highest-scored candidates across BOTH its categories (AI, Tech News), with
+ * no fixed per-category mix. Unlike Academy's selectTopics()/
+ * selectTopicsForPillar(), Digital has no weekday pillar rotation to honour —
+ * it's news/commentary, so "freshest and most relevant, whatever the mix" is
+ * the right default. Recent and evergreen are interleaved the same way as
+ * selectTopicsForPillar(), though Digital currently has no evergreen bank so
+ * this reduces to "top N recent by score" in practice.
+ *
+ * @param {Array} candidates Candidate topic objects (already filtered to Digital's profile)
+ * @param {number} [count] How many topics to offer (default 3)
+ * @returns {Array} Up to `count` topics
+ */
+export function selectTopicsForDigital(candidates, count = 3) {
+  if (!Array.isArray(candidates)) {
+    throw new Error('Candidates must be a valid array');
+  }
+
+  const scored = candidates.map(c => ({ ...c, _score: scoreCandidate(c) }));
+  const recent = scored.filter(c => c.type === 'recent').sort((a, b) => b._score - a._score);
+  const evergreen = scored.filter(c => c.type === 'evergreen').sort((a, b) => b._score - a._score);
+
+  const picked = [];
+  let r = 0, e = 0;
+  while (picked.length < count && (r < recent.length || e < evergreen.length)) {
+    if (r < recent.length) picked.push(recent[r++]);
+    if (picked.length < count && e < evergreen.length) picked.push(evergreen[e++]);
+  }
+
+  return picked.map(({ _score, ...rest }) => rest);
+}
+
 // standalone run block
 if (process.argv[1] && fileURLToPath(import.meta.url) === path.resolve(process.argv[1])) {
   console.log('--- STANDALONE TESTING: src/select.js ---');

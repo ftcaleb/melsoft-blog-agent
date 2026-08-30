@@ -64,6 +64,26 @@ export const keywords = {
   }
 };
 
+// Digital's keyword taxonomy is intentionally flat — two categories (AI,
+// Tech News), no sub-clusters like Academy's pillar->cluster structure. It
+// targets AI tool/vendor names and general tech-industry search intent rather
+// than course-purchase intent.
+export const digitalKeywords = {
+  AI: [
+    'claude ai',
+    'openai chatgpt',
+    'best ai tools',
+    'ai coding assistant',
+    'generative ai for business',
+  ],
+  'Tech News': [
+    'tech industry news',
+    'ai implementation for business',
+    'enterprise ai adoption',
+    'latest ai models',
+  ],
+};
+
 // Cluster-classification patterns, scoped per pillar. Each cluster key MUST
 // match a cluster key under `keywords` above so classification and keyword
 // lookup stay in sync. ORDER MATTERS: on a scoring tie the earlier cluster wins,
@@ -135,9 +155,16 @@ export function classifyCluster(topic) {
  *
  * @param {object} topic Topic object, expects at least { pillar, title?, cluster? }
  * @param {number} limit Max number of keywords to return (default 8)
+ * @param {import('./profiles.js').SiteProfile} [profile] Defaults to Academy's flow (cluster-routed).
+ *   Digital has no sub-cluster taxonomy — its category IS the lookup key.
  * @returns {string[]}
  */
-export function getKeywordsForTopic(topic, limit = 8) {
+export function getKeywordsForTopic(topic, limit = 8, profile) {
+  if (profile && profile.key === 'digital') {
+    const list = digitalKeywords[topic && topic.pillar] || Object.values(digitalKeywords).flat();
+    return list.slice(0, limit);
+  }
+
   if (!topic || !topic.pillar || !keywords[topic.pillar]) return [];
 
   const pillarKeywords = keywords[topic.pillar];

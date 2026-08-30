@@ -7,6 +7,7 @@ import fs from 'fs/promises';
 import { jsonrepair } from 'jsonrepair';
 import { logAnthropicUsage } from './usage.js';
 import { getKeywordsForTopic, classifyCluster } from './keywords.js';
+import { getProfile } from './profiles.js';
 
 // Load environment variables
 dotenv.config();
@@ -455,11 +456,13 @@ export function validatePost(post) {
  *
  * @param {object} topic Topic object
  * @param {string} keywordLine Pre-rendered SEO keyword line (may be empty)
+ * @param {import('./profiles.js').SiteProfile} profile Supplies the voice/brand-rule block
  * @returns {string}
  */
-function buildPrompt(topic, keywordLine) {
+function buildPrompt(topic, keywordLine, profile) {
   return `
-    You are an elite educational copywriter writing an article for Melsoft Academy, a South African training provider.
+    ${profile.writerVoice}
+
     Your task is to write a comprehensive, long-form, publish-ready blog post based on the following topic details:
 
     Topic Title: "${topic.title}"
@@ -469,28 +472,18 @@ function buildPrompt(topic, keywordLine) {
     Source Notes: "${topic.sourceNotes}"
     ${keywordLine}
 
-    CRITICAL WRITING RULES:
-    1. EDUCATION FIRST, BUT CONCISE: The post must teach the reader clearly and get to the point quickly — no padding, no filler. Target a SHORT length of roughly 500 to 800 words total. Include only: a brief definition/context, the 2 to 4 most important points (with quick South African context and a concrete example where it genuinely helps), and a short "what to do next" takeaway. An FAQ is OPTIONAL — include at most 2 or 3 short Q&As only if they add real value, otherwise omit it entirely. Favour short paragraphs and scannable subheadings over exhaustive coverage.
-    2. DUAL AUDIENCE: Write naturally for both:
-       - Individual learners (B2C) trying to decide what digital or vocational skill to learn next.
-       - Executives and HR managers (B2B) responsible for corporate training budgets, Skills Development Levy (SDL) recovery, and B-BBEE skills development scoring.
-       Address both audiences organically and cohesively within the article; do not divide the post into separate B2B and B2C sections.
-    3. SEO OPTIMIZATION: Write a keyword-optimized, compelling title and an engaging meta description (between 150 and 160 characters). Use scannable markdown formatting with clear H2 and H3 subheadings.
-    4. STRICT LIMIT ON MELSOFT PROMOTION: Mention 'Melsoft' or 'Melsoft Academy' AT MOST TWICE in the entire post: once as a brief contextual mention roughly two-thirds of the way through the article, and once in a short closing call-to-action paragraph. Do not mention Melsoft anywhere else, including the introduction, headings, or FAQ section.
-    5. STRICT ACCREDITATION WORDING: If you mention Melsoft at all, you MUST refer to it as "QCTO-accredited". NEVER use the phrase "SETA-accredited" when describing Melsoft, even if the article covers a SETA-funded programme.
-    6. NO INVENTED STATISTICS: Every statistic or figure you use must be fact-checked and verified using the web_search tool against a real, current source. You must attribute all statistics inline (e.g., "according to [Source]"). If a statistic cannot be verified via search, do not include it. Skip it entirely rather than making an estimate or guess.
-    7. TONAL PRINCIPLE: Ensure a reader who has absolutely no intention of buying from Melsoft still finds the post highly valuable, informative, and objective.
-    8. CURRENT DATE AWARENESS: The current date is July 2026. Any year references in the title or body (e.g. "2026 guide," current statistics, "as of [year]") must be consistent with that, not an earlier year (like 2025), unless referring to a historical data point from a cited source (which is fine and should keep its real source year).
-    9. NO TABLES: Never use markdown tables. Present comparisons or structured data as bulleted lists instead.
-    10. NO EMOJI: Never use emoji anywhere in the post, including checkmarks like ✅.
-    11. NO LINKS OR PLACEHOLDERS: Never include markdown hyperlinks or square-bracketed placeholder text (like "[Explore our programmes...]"). Plain text only; refer to things by name.
-    12. FAQ FORMATTING (only if you include an FAQ): The section MUST begin with the H2 heading exactly "## Frequently Asked Questions" (never just "## FAQ" or "## FAQ: ..."). Format EACH question as its own H3 subheading ("### Is X worth it?") with the answer in one or more normal paragraphs directly beneath it. NEVER prefix questions or answers with "Q:" or "A:", and never combine a question and its answer into a single paragraph. Example:
+    ADDITIONAL RULES (apply regardless of the voice/brand rules above):
+    1. CURRENT DATE AWARENESS: The current date is July 2026. Any year references in the title or body (e.g. "2026 guide," current statistics, "as of [year]") must be consistent with that, not an earlier year (like 2025), unless referring to a historical data point from a cited source (which is fine and should keep its real source year).
+    2. NO TABLES: Never use markdown tables. Present comparisons or structured data as bulleted lists instead.
+    3. NO EMOJI: Never use emoji anywhere in the post, including checkmarks like ✅.
+    4. NO LINKS OR PLACEHOLDERS: Never include markdown hyperlinks or square-bracketed placeholder text (like "[Explore our programmes...]"). Plain text only; refer to things by name.
+    5. FAQ FORMATTING (only if you include an FAQ): The section MUST begin with the H2 heading exactly "## Frequently Asked Questions" (never just "## FAQ" or "## FAQ: ..."). Format EACH question as its own H3 subheading ("### Is X worth it?") with the answer in one or more normal paragraphs directly beneath it. NEVER prefix questions or answers with "Q:" or "A:", and never combine a question and its answer into a single paragraph. Example:
        ## Frequently Asked Questions
 
        ### Do I need a degree to get started?
 
        No. Many people enter through accredited short courses and a strong portfolio...
-    13. SEO KEYWORD USE (only if a "Relevant SEO Keywords" line is provided above):
+    6. SEO KEYWORD USE (only if a "Relevant SEO Keywords" line is provided above):
     - TITLE & META DESCRIPTION: Identify the single highest-relevance keyword
       from the list. That keyword (or an unmistakably close variant — e.g.
       "course" may become "courses") MUST appear in the title, the meta
@@ -501,9 +494,8 @@ function buildPrompt(topic, keywordLine) {
     - BODY: Use the remaining keywords naturally in the body ONLY where they
       genuinely fit the sentence and topic. Never force a keyword that does not
       fit naturally — skip it instead. Body keyword usage must never compromise
-      rule 1 (tight, non-padded writing) or rule 7 (objective, genuinely-valuable
-      tone): if working a keyword in would add filler or make the copy read like
-      an advert, leave it out.
+      the tight, non-padded, objective tone required above: if working a keyword
+      in would add filler or make the copy read like an advert, leave it out.
 
     RESPONSE FORMAT:
     You must respond ONLY with a single valid JSON object matching the structure below.
@@ -531,9 +523,10 @@ function buildPrompt(topic, keywordLine) {
  * failed draft must never be saved.
  *
  * @param {object} topic Topic object ({ title, pitch, pillar, type, sourceNotes })
+ * @param {import('./profiles.js').SiteProfile} [profile] Defaults to Academy — every existing caller is unaffected
  * @returns {Promise<object>} Generated post object
  */
-export async function writePost(topic) {
+export async function writePost(topic, profile = getProfile('academy')) {
   if (!topic || !topic.title) {
     throw new Error('Invalid topic provided to writePost()');
   }
@@ -546,20 +539,21 @@ export async function writePost(topic) {
   const anthropic = new Anthropic({ apiKey });
 
   // Resolve the topic's cluster once (used both to route SEO keywords and to
-  // persist the tag on the post for per-cluster performance reporting). Null
-  // when it can't be classified. Passed into getKeywordsForTopic so the keywords
-  // surfaced match the cluster we store.
+  // persist the tag on the post for per-cluster performance reporting). Only a
+  // concept for Academy's tech/skills taxonomy — classifyCluster() has no
+  // patterns for Digital's categories and simply returns null for it, which is
+  // the correct behaviour (Digital has no sub-cluster tagging).
   const cluster = topic.cluster || classifyCluster(topic);
 
   // Surface relevant SEO keywords for this topic's cluster so the model can
   // weave them in naturally. Empty when no keywords are available — keywordLine
   // then contributes nothing to the prompt.
-  const relevantKeywords = getKeywordsForTopic({ ...topic, cluster });
+  const relevantKeywords = getKeywordsForTopic({ ...topic, cluster }, 8, profile);
   const keywordLine = relevantKeywords.length
     ? `Relevant SEO Keywords (weave these naturally where they fit — do not force them, do not keyword-stuff, do not list them verbatim): ${relevantKeywords.join(', ')}`
     : '';
 
-  const promptText = buildPrompt(topic, keywordLine);
+  const promptText = buildPrompt(topic, keywordLine, profile);
 
   console.log(`[writePost] Querying Claude to write post for: "${topic.title}"...`);
 
@@ -674,12 +668,13 @@ export async function writePost(topic) {
     }
 
     // Soft editorial checks: worth flagging for review, but not grounds to
-    // discard an otherwise well-formed article.
+    // discard an otherwise well-formed article. Cap is profile-specific
+    // (Academy allows 2 mentions, Digital's lighter-touch CTA allows 1).
     const melsoftCount = (cleanBody.match(/Melsoft/gi) || []).length;
-    if (melsoftCount > 2) {
-      console.warn(`WARNING: Melsoft mentioned more than twice (${melsoftCount} times) — review for over-promotion`);
+    if (melsoftCount > profile.brandMentionCap) {
+      console.warn(`WARNING: Melsoft mentioned ${melsoftCount} times (max ${profile.brandMentionCap} for ${profile.label}) — review for over-promotion`);
     }
-    if (/SETA-accredited/i.test(cleanBody)) {
+    if (profile.key === 'academy' && /SETA-accredited/i.test(cleanBody)) {
       console.warn('WARNING: Article contains the phrase "SETA-accredited" — Melsoft must only ever be described as "QCTO-accredited"');
     }
 
@@ -691,7 +686,8 @@ export async function writePost(topic) {
       pillar: topic.pillar,
       cluster,
       type: topic.type,
-      sourceTopic: topic.title
+      sourceTopic: topic.title,
+      author: profile.author,
     };
   }
 
