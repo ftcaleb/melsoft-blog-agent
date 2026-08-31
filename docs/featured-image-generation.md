@@ -218,6 +218,7 @@ building, download, upload, URL — is shared.
 | `cloudflare` | FLUX.2 [dev] | free | ~10,000 neurons/day ≈ **3–6 images** | ~100s | Development default. Slow but genuinely free |
 | `gemini` | Nano Banana | $0.039 | **none** — quota is a hard `0` | fast | Matches the existing published look |
 | `fal` | FLUX.2 [pro] | $0.030 | none | 5–15s | Cheapest paid option |
+| `openai` | GPT Image (`gpt-image-2` default) | ~$0.01–$0.20, quality-dependent | none | ~37s at `medium` (default), ~100s at `high` — avoid `high` in production, it risks exceeding Vercel's 60s `maxDuration` | Requires **API Organization Verification** on the OpenAI account first, or every request 403s. DALL-E 2/3 were retired 2026-05-12 — this is the family that replaced them |
 | `stub` | — | free | unlimited | instant | Offline placeholder PNG built with `zlib`. No network. Used by tests |
 
 ### Provider quirks worth knowing
@@ -229,6 +230,13 @@ building, download, upload, URL — is shared.
   billing is not enabled on the project — it is not a rate window to wait out.
   Auth header is `x-goog-api-key`.
 - **fal** auth header is `Key <token>`, not `Bearer`.
+- **OpenAI** always returns base64 (`data[0].b64_json`) — there's no CDN-URL
+  response mode the way the old DALL-E API had, so there's no separate
+  download step. It only accepts a fixed `size` enum (not arbitrary
+  dimensions), so `closestOpenAiSize()` rounds our configured width/height to
+  the nearest of `1024x1024` / `1536x1024` / `1024x1536`. A `403` almost
+  always means the OpenAI *organization* hasn't completed API Organization
+  Verification yet — that's an account-side step, not a code or key problem.
 
 ### Monthly cost at 5 posts/week (~22/month)
 
@@ -249,12 +257,16 @@ See [`.env.example`](../.env.example) for the full annotated list.
 
 | Var | Default | Purpose |
 |---|---|---|
-| `IMAGE_PROVIDER` | `cloudflare` | `cloudflare` \| `gemini` \| `fal` \| `stub` |
+| `IMAGE_PROVIDER` | `cloudflare` | `cloudflare` \| `gemini` \| `fal` \| `openai` \| `stub` |
 | `IMAGE_STYLE` | `photoreal` | `photoreal` \| `illustration` |
 | `IMAGE_WIDTH` / `IMAGE_HEIGHT` | `1024` / `576` | 16:9 for production |
 | `CF_ACCOUNT_ID`, `CF_API_TOKEN` | — | Token needs **both** Workers AI *Read* and *Edit* |
 | `GEMINI_API_KEY` | — | Requires billing enabled for images |
 | `FAL_KEY` | — | |
+| `OPENAI_API_KEY` | — | Org must complete API Organization Verification first |
+| `OPENAI_IMAGE_MODEL` | `gpt-image-2` | |
+| `OPENAI_IMAGE_QUALITY` | `medium` | `low` \| `medium` \| `high` \| `auto` — `medium` beat `high` in testing: ~37s vs ~100s (`high` risks exceeding Vercel's 60s `maxDuration`), and looked warmer/more editorial |
+| `OPENAI_IMAGE_SIZE` | auto-picked | Overrides the automatic aspect-ratio pick |
 
 **Development tip:** set `IMAGE_HEIGHT=512`. Workers AI bills per 512×512 tile
 per step, so 1024×512 costs two tiles where 1024×576 costs four — doubling how

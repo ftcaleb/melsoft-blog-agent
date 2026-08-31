@@ -15,6 +15,13 @@
 //               published on the blog. Requires billing on the Google Cloud
 //               project behind GEMINI_API_KEY (the free tier is a hard zero).
 //   fal         fal.ai FLUX.2 [pro].
+//   openai      OpenAI GPT Image (gpt-image-2 by default). Requires the
+//               OpenAI ORGANIZATION (not just the API key) to complete API
+//               Organization Verification in the OpenAI dashboard first —
+//               every request 403s until that's done. Billing must be
+//               enabled; there is no free tier for image generation. Note:
+//               DALL-E 2/3 were retired from the API on 2026-05-12 — this
+//               provider targets the GPT Image family that replaced them.
 //   stub        A locally-generated placeholder. No network, no cost — lets the
 //               tests and offline development exercise every downstream path.
 //
@@ -154,7 +161,10 @@ export async function describeScene(topic, { variation = false, profile = getPro
   const instruction = wantsPeople
     ? [
         'Describe ONE concrete, photographable scene that evokes the article without illustrating it literally.',
-        'Real South African settings only (offices, training rooms, workshops, campuses, small businesses, homes).',
+        'Real South African settings only (offices, training rooms, workshops, campuses, small businesses, homes) —',
+        'make the LOCATION recognisably South African through concrete visual details (a Johannesburg/Sandton or Cape',
+        'Town skyline glimpsed through a window, jacaranda trees, highveld light, red-brick or corrugated-iron',
+        'commercial architecture), not a generic modern interior that could be anywhere in the world.',
         'People may appear, but keep them at mid-distance or seen from behind or in profile.',
         'NEVER describe: close-ups of hands, fingers on keyboards, readable screens, text, signage, or logos.',
       ].join(' ')
@@ -363,6 +373,77 @@ async function generateViaFal(prompt, width, height) {
 }
 
 /**
+ * Maps our arbitrary width/height (the shared `imageWidth()`/`imageHeight()`
+ * config, e.g. 1024x576 for 16:9) onto the nearest size OpenAI's Images API
+ * actually accepts — it takes a fixed enum, not arbitrary dimensions.
+ * Restricted to the three "standard" sizes (not the 2K/4K options) to keep
+ * cost predictable by default; override with OPENAI_IMAGE_SIZE if a specific
+ * size is wanted.
+ *
+ * @param {number} width
+ * @param {number} height
+ * @returns {string} One of '1024x1024' | '1536x1024' | '1024x1536'
+ */
+function closestOpenAiSize(width, height) {
+  const target = width / height;
+  const options = { '1024x1024': 1, '1536x1024': 1536 / 1024, '1024x1536': 1024 / 1536 };
+  let best = '1024x1024';
+  let bestDelta = Infinity;
+  for (const [name, value] of Object.entries(options)) {
+    const delta = Math.abs(value - target);
+    if (delta < bestDelta) { bestDelta = delta; best = name; }
+  }
+  return best;
+}
+
+/**
+ * OpenAI GPT Image (gpt-image-2 by default). Always returns base64 — there is
+ * no CDN-URL response mode like the old DALL-E API had, which actually makes
+ * this the simplest provider: no separate download step.
+ *
+ * Requires the OpenAI ORGANIZATION (not just the API key) to have completed
+ * "API Organization Verification" in the dashboard; unverified orgs get a 403
+ * on every request regardless of how valid the key is.
+ */
+async function generateViaOpenAI(prompt, width, height) {
+  const apiKey = process.env.OPENAI_API_KEY;
+  if (!apiKey) {
+    throw new ImageGenerationError('OPENAI_API_KEY is required for IMAGE_PROVIDER=openai');
+  }
+
+  const model = process.env.OPENAI_IMAGE_MODEL || 'gpt-image-2';
+  const size = process.env.OPENAI_IMAGE_SIZE || closestOpenAiSize(width, height);
+  // 'medium' beat 'high' in side-by-side testing: ~37s vs ~100s (high risks
+  // exceeding Vercel's 60s maxDuration) and produced a warmer, more editorial
+  // result rather than a flatter, more "corporate stock photo" look.
+  const quality = process.env.OPENAI_IMAGE_QUALITY || 'medium';
+
+  const resp = await fetch('https://api.openai.com/v1/images/generations', {
+    method: 'POST',
+    headers: { Authorization: `Bearer ${apiKey}`, 'Content-Type': 'application/json' },
+    body: JSON.stringify({ model, prompt, size, quality }),
+  });
+
+  if (!resp.ok) {
+    const detail = (await resp.text()).slice(0, 400);
+    const hint =
+      resp.status === 403
+        ? ' (GPT Image models require completing API Organization Verification in the OpenAI dashboard first)'
+        : '';
+    throw new ImageGenerationError(`OpenAI responded ${resp.status}${hint}: ${detail}`);
+  }
+
+  const json = await resp.json();
+  const b64 = json.data && json.data[0] && json.data[0].b64_json;
+  if (!b64) {
+    throw new ImageGenerationError('OpenAI returned no image data');
+  }
+
+  const buffer = Buffer.from(b64, 'base64');
+  return { buffer, contentType: detectContentType(buffer), model };
+}
+
+/**
  * Offline placeholder. Builds a real, valid PNG locally (zlib is built into
  * node), so every downstream path — upload, public URL, Discord embed, dashboard
  * preview — can be exercised with no network and no cost.
@@ -376,6 +457,7 @@ const PROVIDERS = {
   cloudflare: generateViaCloudflare,
   gemini: generateViaGemini,
   fal: generateViaFal,
+  openai: generateViaOpenAI,
   stub: generateViaStub,
 };
 
@@ -387,6 +469,7 @@ const PROVIDER_REQUIRED_ENV = {
   cloudflare: ['CF_ACCOUNT_ID', 'CF_API_TOKEN'],
   gemini: ['GEMINI_API_KEY'],
   fal: ['FAL_KEY'],
+  openai: ['OPENAI_API_KEY'],
   stub: [],
 };
 

@@ -290,6 +290,24 @@ await checkAsync('a missing provider credential is reported, not silently skippe
   }
 });
 
+await checkAsync('OpenAI: a missing OPENAI_API_KEY is reported, not silently skipped', async () => {
+  const prevProvider = process.env.IMAGE_PROVIDER;
+  const prevKey = process.env.OPENAI_API_KEY;
+  process.env.IMAGE_PROVIDER = 'openai';
+  delete process.env.OPENAI_API_KEY;
+  try {
+    await rejects(
+      () => generateFeaturedImage({ title: 'A test post', pillar: 'tech' }),
+      (e) => e instanceof ImageGenerationError && /OPENAI_API_KEY/.test(e.message),
+      'a missing OPENAI_API_KEY must be named in the error'
+    );
+  } finally {
+    if (prevProvider === undefined) delete process.env.IMAGE_PROVIDER;
+    else process.env.IMAGE_PROVIDER = prevProvider;
+    if (prevKey !== undefined) process.env.OPENAI_API_KEY = prevKey;
+  }
+});
+
 console.log('\n--- offline stub provider ---');
 
 check('the stub builds a structurally valid PNG', () => {
