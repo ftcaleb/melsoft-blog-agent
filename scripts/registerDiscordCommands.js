@@ -78,6 +78,16 @@ const commands = [
       LINE_OPTION,
     ],
   },
+  // One-word shortcuts per content line: post a fresh pick-a-topic message
+  // (numbered list + Generate buttons, same as the scheduled cron) on demand.
+  {
+    name: 'academy',
+    description: 'Pick a Melsoft Academy topic to draft — posts the current list with Generate buttons.',
+  },
+  {
+    name: 'digital',
+    description: 'Pick a Melsoft Digital topic to draft — posts the current list with Generate buttons.',
+  },
 ];
 
 async function main() {

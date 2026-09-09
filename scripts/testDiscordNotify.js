@@ -20,7 +20,8 @@
 // Kept as a manual debug utility — safe to re-run any time to re-check button
 // rendering vs. plain-text fallback. Not imported by any production route.
 // ---------------------------------------------------------------------------
-import { notifyDiscord, buildTopicButtons } from '../server.js';
+import { notifyDiscord } from '../server.js';
+import { buildTopicButtons } from '../src/discordInteractions.js';
 
 const DRY_RUN = process.argv.includes('--dry-run') || process.env.DRY_RUN === '1';
 

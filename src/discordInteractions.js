@@ -109,6 +109,85 @@ export function topicHash(title) {
   return h.toString(16).padStart(8, '0');
 }
 
+// Discord message-component constants (see discord.com/developers component docs).
+const DISCORD_ACTION_ROW = 1; // component type: a row that holds up to 5 buttons
+const DISCORD_BUTTON = 2; // component type: a button
+const DISCORD_BUTTON_PRIMARY = 1; // button style: filled/primary
+const DISCORD_CUSTOM_ID_MAX = 100; // hard limit on a component custom_id
+const DISCORD_BUTTONS_PER_ROW = 5; // max buttons in one action row
+const DISCORD_MAX_BUTTON_ROWS = 5; // max action rows in one message
+
+// Builds "Generate #N" button rows for the given topics, matching the numbering
+// used in the message's text list. Each button's custom_id is
+// `generate:<line>:h:<hash>` — a SHORT reference the interactions handler
+// resolves back to the exact topic before drafting it.
+//
+// Why a hash and not the title: Discord caps custom_id at 100 chars and titles
+// routinely run 90–120, so embedding the full title silently dropped almost
+// every button (only a title <= 91 chars survived). A hash is always ~19 chars,
+// so every button renders — and unlike an index it can never resolve to a
+// different topic if the topic list is refreshed before someone clicks.
+//
+// `line` is embedded so the click routes to the right content line/table (see
+// parseLinePayload) — always encoded explicitly here (even for 'academy')
+// rather than relying on that function's no-prefix default, so every NEWLY
+// posted button is unambiguous. Lives here (not server.js) so both the cron
+// notification and the on-demand /academy + /digital commands share it.
+export function buildTopicButtons(candidates, line = 'academy') {
+  const rows = [];
+  let current = null;
+  const skipped = [];
+
+  for (let i = 0; i < candidates.length; i++) {
+    const title = String(candidates[i] && candidates[i].title || '').trim();
+    if (!title) continue;
+
+    const customId = `generate:${line}:h:${topicHash(title)}`;
+    if (customId.length > DISCORD_CUSTOM_ID_MAX) {
+      skipped.push(i + 1); // unreachable in practice; kept as a guard
+      continue;
+    }
+
+    if (!current || current.components.length >= DISCORD_BUTTONS_PER_ROW) {
+      if (rows.length >= DISCORD_MAX_BUTTON_ROWS) break; // out of room for more rows
+      current = { type: DISCORD_ACTION_ROW, components: [] };
+      rows.push(current);
+    }
+
+    current.components.push({
+      type: DISCORD_BUTTON,
+      style: DISCORD_BUTTON_PRIMARY,
+      label: `Generate #${i + 1}`,
+      custom_id: customId,
+    });
+  }
+
+  if (skipped.length) {
+    console.log(`[discord] Skipped Generate buttons for long-title topic(s): #${skipped.join(', #')} (still listed; draftable via /generate).`);
+  }
+  return rows;
+}
+
+// Builds the on-demand "pick a topic" message for a content line — the same
+// numbered list + Generate buttons the scheduled cron posts, but triggered by
+// a person typing /academy or /digital, so no @mention (they're already
+// looking) and no weekday/pillar framing (that's the cron's daily-plan
+// concept, not a manual pull).
+function formatPickTopicMessage(topics, profile) {
+  const appUrl = process.env.APP_URL || 'https://melsoft-blog.vercel.app';
+  const heading = `🔔 **Melsoft ${profile.label} — pick a topic**`;
+  if (!Array.isArray(topics) || topics.length === 0) {
+    return `${heading}\n\nNo topics are available right now. Try again after the next scheduled research run.\n\n👉 **Open the blog agent:** ${appUrl}`;
+  }
+  const list = topics
+    .map((t, i) => `${i + 1}. \`[${String(t.pillar || '?').toUpperCase()}]\` ${t.title}`)
+    .join('\n');
+  return (
+    `${heading}\n\n👉 **Open the blog agent:** ${appUrl}\n\n${list}\n\n` +
+    `🖱️ Tap a button below to draft that topic here in Discord.`
+  );
+}
+
 // Resolves a generate-button payload into something runGenerate can use.
 //   "h:<hash>" -> the matching candidate object (carrying pillar/pitch/cluster),
 //                 or null when nothing matches (topics rotated / already written).
@@ -554,6 +633,23 @@ async function handleTopicsDeferred(interaction, profile = getProfile('academy')
   }
 }
 
+// /academy and /digital: post a fresh pick-a-topic message with Generate
+// buttons for that line, on demand. Buttons are only attached when there is
+// something to click — an empty list gets the plain "nothing available" text.
+async function handlePickTopicDeferred(interaction, profile) {
+  try {
+    const topics = await getSelectedTopics({ forceFresh: false, profile });
+    await editOriginalResponse(
+      interaction,
+      formatPickTopicMessage(topics, profile),
+      topics.length ? buildTopicButtons(topics, profile.key) : undefined
+    );
+  } catch (err) {
+    console.warn(`[discord] /${profile.key} failed:`, err.message);
+    await editOriginalResponse(interaction, friendlyError('📋 Couldn’t pull up the topic list.', err));
+  }
+}
+
 // Immediate JSON responses -------------------------------------------------
 
 function pong(res) {
@@ -626,6 +722,17 @@ export function registerDiscordRoutes(app) {
           // Claude and exceed the 3s window), then edit with the result.
           defer(res, false);
           keepAlive(handleTopicsDeferred(interaction, profile));
+          return;
+        }
+
+        // On-demand "pick a topic" for one line — the same numbered list +
+        // Generate buttons the scheduled cron posts, without waiting for the
+        // schedule. Read-only like /topics (cache-served, nothing billed
+        // here); clicking a button still goes through the normal generate
+        // allow-list gate.
+        if (name === 'academy' || name === 'digital') {
+          defer(res, false);
+          keepAlive(handlePickTopicDeferred(interaction, getProfile(name)));
           return;
         }
 

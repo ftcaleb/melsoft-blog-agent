@@ -7,7 +7,7 @@ import { selectTopics, selectTopicsForPillar, selectTopicsForDigital, pillarForD
 import { writePost, PostValidationError, formatPostDate } from './src/writer.js';
 import { supabase } from './src/supabaseClient.js';
 import { markdownToBlocks, computeReadTime } from './src/markdownToBlocks.js';
-import { registerDiscordRoutes, topicHash } from './src/discordInteractions.js';
+import { registerDiscordRoutes, buildTopicButtons } from './src/discordInteractions.js';
 import { notifyDiscord, notifyFailure } from './src/notify.js';
 import { generateFeaturedImageSafe, regenerateImageForDraft, ImageGenerationError } from './src/imageGen.js';
 import { getProfile } from './src/profiles.js';
@@ -66,64 +66,6 @@ async function requireAuth(req, res, next) {
     console.error('[auth] Token verification failed:', err);
     return res.status(401).json({ error: 'Authentication check failed' });
   }
-}
-
-// Discord message-component constants (see discord.com/developers component docs).
-const DISCORD_ACTION_ROW = 1; // component type: a row that holds up to 5 buttons
-const DISCORD_BUTTON = 2; // component type: a button
-const DISCORD_BUTTON_PRIMARY = 1; // button style: filled/primary
-const DISCORD_CUSTOM_ID_MAX = 100; // hard limit on a component custom_id
-const DISCORD_BUTTONS_PER_ROW = 5; // max buttons in one action row
-const DISCORD_MAX_BUTTON_ROWS = 5; // max action rows in one message
-
-// Builds "Generate #N" button rows for the given topics, matching the numbering
-// used in the notification's text list. Each button's custom_id is
-// `generate:h:<hash>` — a SHORT reference the Discord interactions handler
-// resolves back to the exact topic before drafting it.
-//
-// Why a hash and not the title: Discord caps custom_id at 100 chars and titles
-// routinely run 90–120, so embedding the full title silently dropped almost
-// every button (only a title <= 91 chars survived). A hash is always ~19 chars,
-// so every button renders — and unlike an index it can never resolve to a
-// different topic if the topic list is refreshed before someone clicks.
-//
-// `line` is embedded so the click routes to the right content line/table (see
-// parseLinePayload in discordInteractions.js) — always encoded explicitly here
-// (even for 'academy') rather than relying on that function's no-prefix
-// default, so every NEWLY posted button is unambiguous.
-export function buildTopicButtons(candidates, line = 'academy') {
-  const rows = [];
-  let current = null;
-  const skipped = [];
-
-  for (let i = 0; i < candidates.length; i++) {
-    const title = String(candidates[i] && candidates[i].title || '').trim();
-    if (!title) continue;
-
-    const customId = `generate:${line}:h:${topicHash(title)}`;
-    if (customId.length > DISCORD_CUSTOM_ID_MAX) {
-      skipped.push(i + 1); // unreachable in practice; kept as a guard
-      continue;
-    }
-
-    if (!current || current.components.length >= DISCORD_BUTTONS_PER_ROW) {
-      if (rows.length >= DISCORD_MAX_BUTTON_ROWS) break; // out of room for more rows
-      current = { type: DISCORD_ACTION_ROW, components: [] };
-      rows.push(current);
-    }
-
-    current.components.push({
-      type: DISCORD_BUTTON,
-      style: DISCORD_BUTTON_PRIMARY,
-      label: `Generate #${i + 1}`,
-      custom_id: customId,
-    });
-  }
-
-  if (skipped.length) {
-    console.log(`[discord] Skipped Generate buttons for long-title topic(s): #${skipped.join(', #')} (still listed; draftable via /generate).`);
-  }
-  return rows;
 }
 
 // Scheduled research-cache refresh (Vercel cron). Authenticated by CRON_SECRET,
