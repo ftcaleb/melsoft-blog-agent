@@ -1,16 +1,27 @@
 // One-time (manual) script to register the Melsoft blog-agent slash commands
-// with Discord. Run it whenever the command definitions below change:
+// with Discord. Run it whenever the command definitions below change — nothing
+// registers automatically on deploy:
 //
-//   node scripts/registerDiscordCommands.js
+//   node scripts/registerDiscordCommands.js                  # global scope
+//   node scripts/registerDiscordCommands.js --guild <id>     # one server, instant
+//   node scripts/registerDiscordCommands.js --guild <id> --clear-global
 //
 // This is NOT part of the server's request path — it never runs on boot. It
-// performs a global command overwrite via
-//   PUT /applications/{DISCORD_APPLICATION_ID}/commands
-// authenticated with the bot token ("Authorization: Bot <token>"). Global
-// command propagation can take up to ~1 hour on Discord's side.
+// performs a full command-list overwrite (PUT) authenticated with the bot token.
+//
+// SCOPE MATTERS FOR SPEED. Global registrations can take up to ~1 hour to
+// appear in Discord clients (and clients cache the list hard). Guild-scoped
+// registrations apply immediately. The bot only operates in one server, so
+// guild scope is the practical choice; set DISCORD_GUILD_ID (or pass --guild)
+// to use it. Keeping BOTH a global and a guild set makes every command show
+// up twice once global propagation catches up — --clear-global wipes the
+// global set for exactly that reason. It deliberately refuses to run without
+// a guild id, since that would leave the bot with no commands at all.
 //
 // Required env vars (already set locally and in Vercel):
 //   DISCORD_APPLICATION_ID, DISCORD_BOT_TOKEN
+// Optional: DISCORD_GUILD_ID (the Melsoft server id) for instant, server-scoped
+// registration.
 import dotenv from 'dotenv';
 
 dotenv.config();
@@ -90,33 +101,61 @@ const commands = [
   },
 ];
 
-async function main() {
-  const url = `https://discord.com/api/v10/applications/${APPLICATION_ID}/commands`;
-  const resp = await fetch(url, {
-    method: 'PUT',
-    headers: {
-      'Content-Type': 'application/json',
-      Authorization: `Bot ${BOT_TOKEN}`,
-    },
-    body: JSON.stringify(commands),
-  });
+function argValue(flag) {
+  const i = process.argv.indexOf(flag);
+  return i !== -1 ? process.argv[i + 1] : undefined;
+}
 
+const GUILD_ID = process.env.DISCORD_GUILD_ID || argValue('--guild');
+const CLEAR_GLOBAL = process.argv.includes('--clear-global');
+
+const API = 'https://discord.com/api/v10';
+const headers = { 'Content-Type': 'application/json', Authorization: `Bot ${BOT_TOKEN}` };
+
+// Full overwrite of one command set. Exits on failure so a half-applied state
+// is never reported as success; Discord returns the stored list on success.
+async function overwrite(url, body, label) {
+  const resp = await fetch(url, { method: 'PUT', headers, body: JSON.stringify(body) });
   const text = await resp.text();
   if (!resp.ok) {
-    console.error(`Command registration failed: HTTP ${resp.status}`);
+    console.error(`${label} failed: HTTP ${resp.status}`);
     console.error(text);
     process.exit(1);
   }
-
-  let registered;
+  let parsed;
   try {
-    registered = JSON.parse(text);
+    parsed = JSON.parse(text);
   } catch {
-    registered = [];
+    parsed = [];
   }
-  console.log(`Registered ${Array.isArray(registered) ? registered.length : 0} command(s):`);
-  (Array.isArray(registered) ? registered : []).forEach((c) => console.log(`  /${c.name}`));
-  console.log('Global commands can take up to ~1 hour to appear in Discord.');
+  return Array.isArray(parsed) ? parsed : [];
+}
+
+async function main() {
+  if (CLEAR_GLOBAL && !GUILD_ID) {
+    console.error('--clear-global requires a guild id (DISCORD_GUILD_ID or --guild <id>) — otherwise the bot would be left with no commands at all.');
+    process.exit(1);
+  }
+
+  const scope = GUILD_ID ? `guild ${GUILD_ID}` : 'global';
+  const url = GUILD_ID
+    ? `${API}/applications/${APPLICATION_ID}/guilds/${GUILD_ID}/commands`
+    : `${API}/applications/${APPLICATION_ID}/commands`;
+
+  const registered = await overwrite(url, commands, `Command registration (${scope})`);
+  console.log(`Registered ${registered.length} ${scope} command(s):`);
+  registered.forEach((c) => console.log(`  /${c.name}`));
+
+  if (CLEAR_GLOBAL) {
+    await overwrite(`${API}/applications/${APPLICATION_ID}/commands`, [], 'Clearing global commands');
+    console.log('Cleared the global command set — the guild-scoped set is now the only one.');
+  }
+
+  console.log(
+    GUILD_ID
+      ? 'Guild-scoped commands apply immediately (a Discord restart / Ctrl+R may still be needed to refresh the picker).'
+      : 'Global commands can take up to ~1 hour to appear in Discord.'
+  );
 }
 
 main().catch((err) => {
