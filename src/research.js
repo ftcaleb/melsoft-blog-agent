@@ -337,8 +337,15 @@ ${excludedSection}
 
   const baseParams = {
     model: 'claude-haiku-4-5-20251001',
-    max_tokens: 4000,
-    tools: [{ type: 'web_search_20250305', name: 'web_search', max_uses: 3 }],
+    max_tokens: 2500,
+    // max_uses capped at 2, not 3: Vercel's 60s maxDuration (Hobby plan, can't
+    // be raised without upgrading) was measured hard-timing out this call for
+    // Digital's "trending globally" prompt — a far broader, more saturated
+    // search space than Academy's narrow SA-training-market niche, so it was
+    // plausibly spending its search budget more freely. Fewer allowed search
+    // round-trips bounds worst-case latency for both profiles; Academy was
+    // never observed timing out, so this is pure safety margin there.
+    tools: [{ type: 'web_search_20250305', name: 'web_search', max_uses: 2 }],
     messages: [
       { role: 'user', content: promptText }
     ]
