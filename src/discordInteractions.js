@@ -20,11 +20,12 @@ import { waitUntil } from '@vercel/functions';
 
 import { generateCandidates } from './research.js';
 import { selectTopics, selectTopicsForDigital } from './select.js';
-import { writePost, formatPostDate } from './writer.js';
+import { writePost, formatPostDate, PostValidationError } from './writer.js';
 import { supabase } from './supabaseClient.js';
 import { markdownToBlocks, computeReadTime } from './markdownToBlocks.js';
 import { generateFeaturedImageSafe, regenerateImageForDraft } from './imageGen.js';
 import { PROFILES, getProfile } from './profiles.js';
+import { activeTextProvider } from './textProvider.js';
 
 const DISCORD_API_BASE = 'https://discord.com/api/v10';
 
@@ -553,15 +554,59 @@ async function handleGenerateDeferred(interaction, topicInput, profile = getProf
     await editOriginalResponse(interaction, content, components, buildDraftEmbeds(title, excerpt, image));
   } catch (err) {
     console.warn('[discord] Generate failed:', err.message);
-    // After writer.js's own retries, an API-status error here means Anthropic
-    // genuinely didn't come back — worth saying so explicitly rather than
-    // leaving it to be inferred from the raw error text below.
-    const apiFailure = err && (!err.status || err.status >= 500);
-    const intro = apiFailure
-      ? "😵‍💫 Well, this is awkward — Anthropic's API face-planted and stayed down even after a few retries. Probably just a hiccup on their end, try again in a few minutes."
-      : "😬 Couldn't get that draft written.";
-    await editOriginalResponse(interaction, friendlyError(intro, err));
+    await editOriginalResponse(interaction, friendlyError(introForGenerateError(err), err));
   }
+}
+
+/**
+ * Picks the friendly opening line for a failed generation.
+ *
+ * Classifying properly matters more than it looks. The previous version
+ * treated ANY error without an HTTP status as a model-API outage — and named
+ * the vendor in hardcoded text. So a Supabase failure, a missing key, or a
+ * draft rejected by the content gate all reported that the model provider
+ * "face-planted", sending whoever is on the other end to the wrong status
+ * page. Each of these needs a genuinely different response from the reader,
+ * so each gets its own line. The raw error still rides along underneath.
+ *
+ * Exported for tests: this is the message a human actually reads when the
+ * pipeline fails, and getting it wrong sends them debugging the wrong system.
+ *
+ * @param {Error} err
+ * @returns {string} The friendly intro line
+ */
+export function introForGenerateError(err) {
+  // Rejected by the content gate: the model answered, the draft just wasn't
+  // good enough to save. Retrying is genuinely likely to work.
+  if (err instanceof PostValidationError) {
+    return "🧐 The draft came back, but it didn't pass the quality checks, so nothing was saved. That's usually a one-off — try again.";
+  }
+
+  const isProviderError = err && err.name === 'TextProviderError';
+  const status = err && typeof err.status === 'number' ? err.status : null;
+
+  // A provider error with no HTTP status means we never got as far as calling
+  // the API — almost always a missing/incorrect key. Retrying will not help,
+  // so say so rather than inviting a pointless retry.
+  if (isProviderError && status === null) {
+    return "🔑 The writing model isn't configured properly on the server, so nothing was generated. This one needs a config fix, not a retry.";
+  }
+
+  // A real model-API failure. Name the ACTIVE provider so the status page
+  // someone checks is the right one — this is read by people who won't know
+  // which vendor is wired up today.
+  if (isProviderError || status !== null) {
+    const vendor = activeTextProvider() === 'openai' ? 'OpenAI' : 'Anthropic';
+    return `😵‍💫 Well, this is awkward — ${vendor}'s API face-planted and stayed down even after a few retries. Probably just a hiccup on their end, try again in a few minutes.`;
+  }
+
+  // Everything else reaches here, and the database is the common one: the
+  // article may well have been written and paid for before the save failed.
+  if (/supabase|restricted|exceed_\w+_quota|fetch failed/i.test(String(err && err.message))) {
+    return "🗄️ The post was generated, but saving it to the database failed — so it wasn't kept. Worth checking the database is up before retrying, or the generation cost repeats for nothing.";
+  }
+
+  return "😬 Couldn't get that draft written.";
 }
 
 /**

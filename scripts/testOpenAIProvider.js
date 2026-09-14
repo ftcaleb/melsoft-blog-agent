@@ -12,7 +12,8 @@
 //      inline markdown links on every model tier measured, which the prompt
 //      forbids outright and validatePost previously did not catch.
 
-import { normaliseOpenAIResponse } from '../src/textProvider.js';
+import { normaliseOpenAIResponse, TextProviderError } from '../src/textProvider.js';
+import { introForGenerateError } from '../src/discordInteractions.js';
 import {
   parseWriterResponse,
   validatePost,
@@ -192,6 +193,50 @@ check('the incident signatures still fire (guard not weakened by the port)', () 
     reasons = err.reasons || [];
   }
   assert(reasons.length >= 3, `expected multiple independent reasons, got ${reasons.length}`);
+});
+
+console.log('\n--- Discord failure messages (what a human actually reads) ---');
+
+check('a model-API outage names the ACTIVE provider, not a hardcoded vendor', () => {
+  const err = new TextProviderError('OpenAI responded 500: upstream error', 500);
+
+  process.env.TEXT_PROVIDER = 'openai';
+  const openaiMsg = introForGenerateError(err);
+  assert(/OpenAI/.test(openaiMsg), `expected OpenAI named, got: ${openaiMsg}`);
+  assert(!/Anthropic/.test(openaiMsg), 'must not name the wrong vendor');
+
+  process.env.TEXT_PROVIDER = 'anthropic';
+  const anthropicMsg = introForGenerateError(err);
+  assert(/Anthropic/.test(anthropicMsg), `expected Anthropic named, got: ${anthropicMsg}`);
+
+  delete process.env.TEXT_PROVIDER;
+});
+
+check('THE REGRESSION: a database failure is not blamed on the model vendor', () => {
+  // Thrown shape from runGenerate() when the Supabase insert fails — a plain
+  // Error with no status. The previous classifier called this a model outage.
+  const err = new Error('Service for this project is restricted due to the following violations: exceed_cached_egress_quota');
+  const msg = introForGenerateError(err);
+  assert(!/OpenAI|Anthropic/.test(msg), `must not name a model vendor: ${msg}`);
+  assert(/database/i.test(msg), `should point at the database: ${msg}`);
+});
+
+check('a rejected draft reads as a quality rejection, not an outage', () => {
+  const msg = introForGenerateError(new PostValidationError(['body is only 12 words (min 300)']));
+  assert(/quality/i.test(msg), `expected a quality-gate message, got: ${msg}`);
+  assert(!/face-planted/.test(msg), 'must not imply a vendor outage');
+});
+
+check('a missing key says config, and does not invite a pointless retry', () => {
+  const msg = introForGenerateError(new TextProviderError('OPENAI_API_KEY is not defined in process.env'));
+  assert(/config/i.test(msg), `expected a config message, got: ${msg}`);
+  assert(!/try again/i.test(msg), 'a missing key will not fix itself on retry');
+});
+
+check('an unrecognised error still gets a sane generic line', () => {
+  const msg = introForGenerateError(new Error('something entirely unexpected'));
+  assert(msg && msg.length > 10, 'must still return a usable message');
+  assert(!/OpenAI|Anthropic|database/.test(msg), 'must not guess at a cause');
 });
 
 console.log(`\n${passed} passed, ${failed} failed\n`);
