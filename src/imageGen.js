@@ -29,14 +29,14 @@
 // after ~7 days). Storing one of those directly would silently break every
 // published post's hero a week later, so the bytes are always copied into
 // Supabase Storage and it is that URL which is persisted.
-import Anthropic from '@anthropic-ai/sdk';
 import dotenv from 'dotenv';
 import zlib from 'zlib';
 import path from 'path';
 import { fileURLToPath } from 'url';
 import { supabase } from './supabaseClient.js';
 import { generateSlug } from './writer.js';
-import { logAnthropicUsage } from './usage.js';
+import { logModelUsage } from './usage.js';
+import { generateText } from './textProvider.js';
 import { getProfile } from './profiles.js';
 
 dotenv.config();
@@ -151,12 +151,11 @@ function fallbackSceneFor(profile, pillar) {
 export async function describeScene(topic, { variation = false, profile = getProfile('academy') } = {}) {
   const fallback = fallbackSceneFor(profile, topic.pillar);
 
-  const apiKey = process.env.ANTHROPIC_API_KEY;
-  if (!apiKey) {
-    console.warn('[imageGen] ANTHROPIC_API_KEY not set — using the fallback scene.');
-    return fallback;
-  }
-
+  // No provider-key check here: which key is required depends on
+  // TEXT_PROVIDER, and generateText() already throws a named error for a
+  // missing one. The catch below turns that into the fallback scene, so a
+  // misconfigured key degrades to a plain-but-correct image rather than
+  // failing the post.
   const wantsPeople = style(profile) === 'photoreal';
   const instruction = wantsPeople
     ? [
@@ -184,14 +183,15 @@ ${variation ? '\nThis is a RETRY: the previous attempt was rejected. Deliberatel
 Respond with ONE sentence of 30 words or fewer describing only the scene. No preamble, no quotation marks, no explanation.`;
 
   try {
-    const anthropic = new Anthropic({ apiKey });
-    const response = await anthropic.messages.create({
-      model: 'claude-haiku-4-5-20251001',
-      max_tokens: 200,
-      messages: [{ role: 'user', content: prompt }],
+    // No schema and no web search: one short sentence, so the cheapest path on
+    // whichever provider is configured.
+    const response = await generateText({
+      label: 'imagePrompt',
+      prompt,
+      maxTokens: 200,
     });
 
-    logAnthropicUsage('imagePrompt', response);
+    logModelUsage('imagePrompt', response);
 
     const text = (response.content || [])
       .filter((b) => b && b.type === 'text' && typeof b.text === 'string')

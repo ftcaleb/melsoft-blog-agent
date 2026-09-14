@@ -1,13 +1,13 @@
 // Deliverable 4: blog post writer
-import Anthropic from '@anthropic-ai/sdk';
 import dotenv from 'dotenv';
 import { fileURLToPath } from 'url';
 import path from 'path';
 import fs from 'fs/promises';
 import { jsonrepair } from 'jsonrepair';
-import { logAnthropicUsage } from './usage.js';
+import { logModelUsage } from './usage.js';
 import { getKeywordsForTopic, classifyCluster } from './keywords.js';
 import { getProfile } from './profiles.js';
+import { generateText, activeTextProvider } from './textProvider.js';
 
 // Load environment variables
 dotenv.config();
@@ -35,41 +35,6 @@ const POST_JSON_SCHEMA = {
   required: ['title', 'metaDescription', 'bodyMarkdown'],
   additionalProperties: false,
 };
-
-// Set to false at runtime if the API ever rejects output_config (e.g. the
-// feature is withdrawn or unavailable on the configured model). The parser and
-// validator below are fully capable without it, so this degrades rather than
-// breaks. Never flipped back within a process — one probe per boot is enough.
-let structuredOutputSupported = true;
-
-const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
-
-/**
- * Retries a single Anthropic call on transient server-side failures (5xx, or
- * connection-level errors with no status at all) with short exponential
- * backoff. The SDK already retries a couple of times internally before
- * throwing; this is a second, coarser layer for when those are exhausted —
- * the kind of failure that otherwise surfaces as a raw
- * "500 Internal server error" straight through to the user. Never retries a
- * 4xx: that means our request is wrong, not a transient blip, and retrying
- * it would just waste time before failing the same way anyway.
- */
-async function callAnthropicWithRetry(fn, { attempts = 3, baseDelayMs = 1000 } = {}) {
-  let lastErr;
-  for (let i = 1; i <= attempts; i++) {
-    try {
-      return await fn();
-    } catch (err) {
-      lastErr = err;
-      const retryable = !err.status || err.status >= 500;
-      if (!retryable || i === attempts) throw err;
-      const delay = baseDelayMs * 2 ** (i - 1);
-      console.warn(`[writer] Anthropic API error (attempt ${i}/${attempts}, status ${err.status || 'n/a'}): ${err.message}. Retrying in ${delay}ms...`);
-      await sleep(delay);
-    }
-  }
-  throw lastErr;
-}
 
 /**
  * Programmatically derives a URL-safe slug from a title string.
@@ -165,6 +130,34 @@ function stripResponseNoise(text) {
   return String(text || '')
     .replace(/<\/?cite\b[^>]*>/gi, '')
     .trim();
+}
+
+/**
+ * Converts inline markdown-link citations to plain text.
+ *
+ * Providers attribute web-search sources differently, and BOTH forms violate
+ * the prompt's "no markdown hyperlinks, plain text only" rule:
+ *   Anthropic  <cite> tags        — stripped by stripResponseNoise() above.
+ *   OpenAI     ([domain](url))    — measured on every model tier tested.
+ *
+ * The prompt still *wants* the attribution ("according to [Source]"), just as
+ * plain text, so the link text is kept and the URL dropped:
+ *   "([docs.github.com](https://docs.github.com/x))" -> "(docs.github.com)"
+ *   "[Stats SA](https://statssa.gov.za)"             -> "Stats SA"
+ *
+ * Enforced in code rather than by prompt instruction, per the incident's
+ * lesson that a model's self-policing is not a control. validatePost() then
+ * rejects any link form this did not recognise, so the two are layered.
+ *
+ * @param {string} text
+ * @returns {string} Text with inline links flattened to their label
+ */
+export function stripCitationLinks(text) {
+  return String(text || '')
+    // Parenthesised citation: ([label](url)) -> (label)
+    .replace(/\(\s*\[([^\]]+)\]\(\s*https?:\/\/[^)\s]+\s*\)\s*\)/gi, '($1)')
+    // Bare inline link: [label](url) -> label
+    .replace(/\[([^\]]+)\]\(\s*https?:\/\/[^)\s]+\s*\)/gi, '$1');
 }
 
 /**
@@ -383,6 +376,15 @@ const CONTAMINATION_CHECKS = [
   { pattern: /^\s*-?\s*rule \d+\s*:/im, label: 'rule-compliance checklist' },
   { pattern: /[✓✔]/, label: 'checklist tick mark' },
   { pattern: /<\/?(?:cite|thinking)\b/i, label: 'internal tag' },
+  // Backstop for stripCitationLinks(). OpenAI's hosted web search attributes
+  // sources as inline markdown links on every model tier measured, and the
+  // prompt forbids links outright ("plain text only; refer to things by
+  // name"). The sanitiser handles the two observed shapes; anything it did
+  // not recognise — reference-style links, a bare <a>, a novel citation
+  // format — is stopped here rather than published.
+  { pattern: /\[[^\]]+\]\(\s*https?:\/\//i, label: 'markdown hyperlink' },
+  { pattern: /\[[^\]]+\]\[[^\]]+\]/, label: 'reference-style markdown link' },
+  { pattern: /<a\s[^>]*href=/i, label: 'raw HTML link' },
 ];
 
 // Word-count envelope. The prompt targets 500-800 words; these bounds leave
@@ -531,13 +533,6 @@ export async function writePost(topic, profile = getProfile('academy')) {
     throw new Error('Invalid topic provided to writePost()');
   }
 
-  const apiKey = process.env.ANTHROPIC_API_KEY;
-  if (!apiKey) {
-    throw new Error('ANTHROPIC_API_KEY is not defined in process.env');
-  }
-
-  const anthropic = new Anthropic({ apiKey });
-
   // Resolve the topic's cluster once (used both to route SEO keywords and to
   // persist the tag on the post for per-cluster performance reporting). Only a
   // concept for Academy's tech/skills taxonomy — classifyCluster() has no
@@ -555,65 +550,29 @@ export async function writePost(topic, profile = getProfile('academy')) {
 
   const promptText = buildPrompt(topic, keywordLine, profile);
 
-  console.log(`[writePost] Querying Claude to write post for: "${topic.title}"...`);
+  console.log(`[writePost] Querying ${activeTextProvider()} to write post for: "${topic.title}"...`);
 
   // One retry: a draft that fails the content gate is regenerated once rather
   // than being saved or silently dropped. Costs a second call only on failure.
   const MAX_ATTEMPTS = 2;
   let lastError = null;
 
-  // Issues the request, transparently dropping output_config if the API ever
-  // rejects it (feature withdrawn, or unavailable on the configured model). The
-  // parser and validator below are fully capable without the schema, so this
-  // degrades instead of failing. Self-contained so the retry cannot interfere
-  // with the attempt counter.
-  const requestPost = async () => {
-    const baseParams = {
-      model: 'claude-haiku-4-5-20251001',
-      max_tokens: 8000,
-      tools: [{ type: 'web_search_20250305', name: 'web_search', max_uses: 3 }],
-      messages: [
-        { role: 'user', content: promptText }
-      ]
-    };
-
-    if (!structuredOutputSupported) {
-      return callAnthropicWithRetry(() => anthropic.messages.create(baseParams));
-    }
-
-    try {
-      return await callAnthropicWithRetry(() => anthropic.messages.create({
-        ...baseParams,
-        // Grammar-constrains decoding to POST_JSON_SCHEMA, so the model cannot
-        // emit commentary or extra drafts alongside the article. Verified
-        // against the live API to work alongside the server-side web_search tool
-        // on this model.
-        output_config: { format: { type: 'json_schema', schema: POST_JSON_SCHEMA } },
-      }));
-    } catch (err) {
-      const rejectedSchema =
-        err && err.status === 400 &&
-        /output_config|json_schema|output_format/i.test(String(err.message || ''));
-
-      // Retries above are already exhausted here, so a 5xx/connection error
-      // reaching this point means the structured (schema + web_search)
-      // request kept failing server-side. Fall back to the unconstrained
-      // request once, in case that combination is what's tripping it — this
-      // does NOT flip structuredOutputSupported, since it may just be this
-      // topic/run rather than a lasting API change.
-      const persistentServerError = err && (!err.status || err.status >= 500);
-
-      if (!rejectedSchema && !persistentServerError) throw err;
-
-      if (rejectedSchema) {
-        console.warn('[writer] API rejected output_config — falling back to unconstrained output for this process.');
-        structuredOutputSupported = false;
-      } else {
-        console.warn('[writer] Structured request kept failing with a server-side error — retrying once without output_config in case that combination is the trigger.');
-      }
-      return callAnthropicWithRetry(() => anthropic.messages.create(baseParams));
-    }
-  };
+  // Provider, model, transient-5xx retry and graceful degradation when
+  // structured output is rejected all live in textProvider.js, which returns a
+  // canonical Anthropic-shaped response so the hardened parser below is
+  // unchanged regardless of vendor.
+  const requestPost = () => generateText({
+    label: 'writer',
+    prompt: promptText,
+    maxTokens: 8000,
+    // Grammar-constrains decoding to POST_JSON_SCHEMA so the model cannot emit
+    // commentary or extra drafts alongside the article. Verified against both
+    // live APIs to work alongside hosted web search.
+    schema: POST_JSON_SCHEMA,
+    // Bounds fact-checking searches. Each one costs money and wall-clock time,
+    // and an unbounded search loop is what pushed the cron past its timeout.
+    webSearchMaxUses: 3,
+  });
 
   for (let attempt = 1; attempt <= MAX_ATTEMPTS; attempt++) {
     let response;
@@ -621,11 +580,11 @@ export async function writePost(topic, profile = getProfile('academy')) {
       response = await requestPost();
     } catch (err) {
       lastError = err;
-      console.error(`[writer] Attempt ${attempt}/${MAX_ATTEMPTS}: Anthropic API call failed — ${err.message}`);
+      console.error(`[writer] Attempt ${attempt}/${MAX_ATTEMPTS}: model API call failed — ${err.message}`);
       continue;
     }
 
-    logAnthropicUsage('writer', response);
+    logModelUsage('writer', response);
 
     // A truncated response yields truncated JSON. Treat it as a failed attempt
     // rather than trying to salvage a half-written article.
@@ -655,9 +614,12 @@ export async function writePost(topic, profile = getProfile('academy')) {
       console.warn(`[writer] Post recovered via a tolerant fallback: ${strategy}`);
     }
 
-    const cleanTitle = (parsedPost.title || topic.title).trim();
-    const cleanMeta = (parsedPost.metaDescription || '').trim();
-    const cleanBody = (parsedPost.bodyMarkdown || '').trim();
+    // Flatten inline citation links BEFORE validation, so legitimate
+    // web-search attribution survives as plain text while validatePost's
+    // hyperlink check still catches any form the sanitiser missed.
+    const cleanTitle = stripCitationLinks(parsedPost.title || topic.title).trim();
+    const cleanMeta = stripCitationLinks(parsedPost.metaDescription || '').trim();
+    const cleanBody = stripCitationLinks(parsedPost.bodyMarkdown || '').trim();
 
     try {
       validatePost({ title: cleanTitle, metaDescription: cleanMeta, bodyMarkdown: cleanBody });

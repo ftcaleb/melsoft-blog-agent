@@ -1,11 +1,11 @@
 // Deliverable 1: research agent
-import Anthropic from '@anthropic-ai/sdk';
 import { jsonrepair } from 'jsonrepair';
 import fs from 'fs/promises';
 import path from 'path';
 import { fileURLToPath } from 'url';
 import dotenv from 'dotenv';
-import { logAnthropicUsage } from './usage.js';
+import { logModelUsage } from './usage.js';
+import { generateText } from './textProvider.js';
 import { supabase } from './supabaseClient.js';
 import { notifyFailure } from './notify.js';
 import { getProfile } from './profiles.js';
@@ -120,11 +120,6 @@ function candidatesJsonSchema(categories) {
     additionalProperties: false,
   };
 }
-
-// Cleared if the API ever rejects output_config; the parser below is fully
-// capable without it, so this degrades rather than breaks. Tracked per
-// profile since a rejection for one line says nothing about the other.
-const structuredOutputSupported = { academy: true, digital: true };
 
 /**
  * Scans for balanced JSON object/array substrings, honouring string literals and
@@ -286,14 +281,6 @@ export function parseCandidatesResponse(content, categories = getProfile('academ
  * @returns {Promise<Array>} Array of recent candidate topic objects (non-empty)
  */
 export async function fetchRecentCandidates(profile = getProfile('academy')) {
-  const apiKey = process.env.ANTHROPIC_API_KEY;
-  if (!apiKey) {
-    console.warn('Warning: ANTHROPIC_API_KEY is not defined in process.env. Skipping recent candidates generation.');
-    return [];
-  }
-
-  const anthropic = new Anthropic({ apiKey });
-
   // Semantic-dedupe assist: pull the titles of already-covered posts and hand
   // them to the model so it doesn't re-discover the same story in new wording
   // (the downstream string filter only catches near-literal re-proposals).
@@ -335,46 +322,26 @@ ${excludedSection}
     }
   `;
 
-  const baseParams = {
-    model: 'claude-haiku-4-5-20251001',
-    max_tokens: 2500,
-    // max_uses capped at 2, not 3: Vercel's 60s maxDuration (Hobby plan, can't
-    // be raised without upgrading) was measured hard-timing out this call for
+  // Provider, model, retry and structured-output degradation are all handled
+  // by textProvider.js, which returns a canonical Anthropic-shaped response so
+  // parseCandidatesResponse() below works regardless of vendor.
+  const response = await generateText({
+    label: 'research',
+    prompt: promptText,
+    maxTokens: 2500,
+    // Grammar-constrains decoding, so the model cannot emit commentary or a
+    // second revised list alongside the candidates.
+    schema: candidatesJsonSchema(profile.categories),
+    // Capped at 2, not 3: this call was measured hard-timing out on Vercel for
     // Digital's "trending globally" prompt — a far broader, more saturated
     // search space than Academy's narrow SA-training-market niche, so it was
-    // plausibly spending its search budget more freely. Fewer allowed search
-    // round-trips bounds worst-case latency for both profiles; Academy was
-    // never observed timing out, so this is pure safety margin there.
-    tools: [{ type: 'web_search_20250305', name: 'web_search', max_uses: 2 }],
-    messages: [
-      { role: 'user', content: promptText }
-    ]
-  };
+    // plausibly spending its search budget more freely. Fewer search
+    // round-trips bounds worst-case latency for both profiles, and each search
+    // is separately billed.
+    webSearchMaxUses: 2,
+  });
 
-  let response;
-  if (!structuredOutputSupported[profile.key]) {
-    response = await anthropic.messages.create(baseParams);
-  } else {
-    try {
-      response = await anthropic.messages.create({
-        ...baseParams,
-        // Grammar-constrains decoding, so the model cannot emit commentary or a
-        // second revised list alongside the candidates. Verified against the live
-        // API to work alongside the server-side web_search tool on this model.
-        output_config: { format: { type: 'json_schema', schema: candidatesJsonSchema(profile.categories) } },
-      });
-    } catch (err) {
-      const rejectedSchema =
-        err && err.status === 400 &&
-        /output_config|json_schema|output_format/i.test(String(err.message || ''));
-      if (!rejectedSchema) throw err;
-      console.warn('[research] API rejected output_config — falling back to unconstrained output for this process.');
-      structuredOutputSupported[profile.key] = false;
-      response = await anthropic.messages.create(baseParams);
-    }
-  }
-
-  logAnthropicUsage('research', response);
+  logModelUsage('research', response);
 
   const recentCandidates = parseCandidatesResponse(response.content, profile.categories);
 
