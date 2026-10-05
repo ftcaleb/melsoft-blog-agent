@@ -178,5 +178,269 @@
     "pitch": "Why continuous reskilling and upskilling matters for South African organisations and how to build an effective internal skills strategy.",
     "pillar": "skills",
     "cluster": "skills-development"
+  },
+  {
+    "title": "AI Courses in South Africa: How to Choose a Programme Employers Actually Respect",
+    "pitch": "How to tell a credible AI course from a repackaged slide deck, covering accreditation, practical assessment, and the questions to ask before you or your team enrol.",
+    "pillar": "tech",
+    "cluster": "ai"
+  },
+  {
+    "title": "Generative AI at Work: A Practical Starter Guide for South African Teams",
+    "pitch": "Where generative AI genuinely saves time in a South African workplace, which tasks to keep human, and how to set simple ground rules before rolling it out to staff.",
+    "pillar": "tech",
+    "cluster": "ai"
+  },
+  {
+    "title": "AI Bias and Fairness: What South African Organisations Need to Get Right",
+    "pitch": "Why AI systems trained elsewhere can misfire on South African data, the fairness risks that matter most locally, and the checks a non-technical manager can insist on.",
+    "pillar": "tech",
+    "cluster": "ai"
+  },
+  {
+    "title": "How to Build an AI Upskilling Plan for Your South African Workforce",
+    "pitch": "A step-by-step approach for employers to assess current AI literacy, prioritise which roles to train first, and fund the programme through existing skills development budgets.",
+    "pillar": "tech",
+    "cluster": "ai"
+  },
+  {
+    "title": "AI Agents Explained: What They Are and Where South African Businesses Can Use Them",
+    "pitch": "A plain-language explanation of how AI agents differ from chatbots, with realistic South African use cases and the operational risks to plan for before deploying one.",
+    "pillar": "tech",
+    "cluster": "ai"
+  },
+  {
+    "title": "From Excel to AI: A Realistic Upskilling Path for South African Office Workers",
+    "pitch": "A staged learning path that takes an administrator from spreadsheets to AI-assisted analysis, with the skills to learn at each step and roughly how long each takes.",
+    "pillar": "tech",
+    "cluster": "ai"
+  },
+  {
+    "title": "AI Policy for South African Employers: What to Put in Writing Before Staff Use AI Tools",
+    "pitch": "The clauses a workable internal AI policy needs, from data handling and POPIA obligations to disclosure and approved tools, written for HR rather than for lawyers.",
+    "pillar": "tech",
+    "cluster": "ai"
+  },
+  {
+    "title": "Do You Need Maths to Work in AI? Entry Routes for South African Career Changers",
+    "pitch": "Which AI roles genuinely require strong mathematics and which do not, plus the realistic entry points open to South Africans moving across from other careers.",
+    "pillar": "tech",
+    "cluster": "ai"
+  },
+  {
+    "title": "Cyber Security Certifications in South Africa: Which One Should You Start With?",
+    "pitch": "A comparison of the entry-level security certifications recognised by South African employers, who each one suits, and the order that makes sense for a beginner.",
+    "pillar": "tech",
+    "cluster": "cybersecurity"
+  },
+  {
+    "title": "Passwords and Multi-Factor Authentication: Small Changes That Protect South African Businesses",
+    "pitch": "Why credential theft remains the most common way South African businesses get breached, and the practical access controls a small team can roll out without new budget.",
+    "pillar": "tech",
+    "cluster": "cybersecurity"
+  },
+  {
+    "title": "Securing Remote and Hybrid Work: A Practical Checklist for South African Employers",
+    "pitch": "The device, network and access risks that come with remote work in South Africa, and a checklist an employer can work through without a dedicated security team.",
+    "pillar": "tech",
+    "cluster": "cybersecurity"
+  },
+  {
+    "title": "Cloud Security Basics for South African Small and Medium Businesses",
+    "pitch": "What your cloud provider secures versus what remains your responsibility, and the misconfigurations that most often expose South African SME data.",
+    "pillar": "tech",
+    "cluster": "cybersecurity"
+  },
+  {
+    "title": "Running a Cybersecurity Awareness Programme Staff Will Actually Complete",
+    "pitch": "How to design security training that changes behaviour rather than ticking a compliance box, including cadence, format and how to measure whether it worked.",
+    "pillar": "tech",
+    "cluster": "cybersecurity"
+  },
+  {
+    "title": "Reporting a Data Breach Under POPIA: What South African Businesses Must Do",
+    "pitch": "The notification duties POPIA places on a business after a security compromise, who must be told and when, and how to prepare the response before you need it.",
+    "pillar": "tech",
+    "cluster": "cybersecurity"
+  },
+  {
+    "title": "Data Science Courses in South Africa: Entry Requirements and Career Outcomes",
+    "pitch": "What South African data science programmes expect from applicants, the roles graduates realistically move into, and how to judge whether a course is worth the fees.",
+    "pillar": "tech",
+    "cluster": "data"
+  },
+  {
+    "title": "Excel Skills That Still Matter in a Data-Driven South African Workplace",
+    "pitch": "The spreadsheet techniques that remain genuinely valuable alongside modern analytics tools, and the point at which a team should move beyond Excel.",
+    "pillar": "tech",
+    "cluster": "data"
+  },
+  {
+    "title": "Data Governance for South African Businesses: Where to Start",
+    "pitch": "A pragmatic first pass at data governance for organisations without a dedicated data team, covering ownership, quality, retention and POPIA alignment.",
+    "pillar": "tech",
+    "cluster": "data"
+  },
+  {
+    "title": "Building a Data-Literate Team: A Guide for South African Managers",
+    "pitch": "How to raise everyday data skills across a department, what baseline literacy should include, and how to structure training so it survives contact with real work.",
+    "pillar": "tech",
+    "cluster": "data"
+  },
+  {
+    "title": "Python for Data Analysis: A Beginner's Path for South African Professionals",
+    "pitch": "Why Python became the default analysis language, what a non-developer actually needs to learn first, and a realistic sequence for getting there alongside a full-time job.",
+    "pillar": "tech",
+    "cluster": "data"
+  },
+  {
+    "title": "How to Become a UX Designer in South Africa Without a Design Degree",
+    "pitch": "The practical routes into UX for career changers, which foundational skills matter most to South African employers, and how to evidence them without formal qualifications.",
+    "pillar": "tech",
+    "cluster": "ux"
+  },
+  {
+    "title": "UX Research Methods Every South African Product Team Should Know",
+    "pitch": "The core research methods that fit small budgets, when each is appropriate, and how to run them responsibly with South African users across languages and devices.",
+    "pillar": "tech",
+    "cluster": "ux"
+  },
+  {
+    "title": "Designing for Accessibility: Building Products All South Africans Can Use",
+    "pitch": "What accessible design means in practice, the barriers that most affect South African users, and the checks a team can build into its existing design process.",
+    "pillar": "tech",
+    "cluster": "ux"
+  },
+  {
+    "title": "Figma for Beginners: Starting Your UX Design Journey in South Africa",
+    "pitch": "An orientation to the tool most South African design teams use day to day, the features worth learning first, and how to practise them on realistic briefs.",
+    "pillar": "tech",
+    "cluster": "ux"
+  },
+  {
+    "title": "Design Systems Explained: Why South African Product Teams Need One",
+    "pitch": "What a design system is, the point at which a growing product team starts to need one, and how to begin building one without pausing delivery.",
+    "pillar": "tech",
+    "cluster": "ux"
+  },
+  {
+    "title": "Front-End vs Back-End Development: Choosing a Specialisation in South Africa",
+    "pitch": "What each discipline involves day to day, how South African hiring demand differs between them, and how to decide which suits your strengths before you commit.",
+    "pillar": "tech",
+    "cluster": "software"
+  },
+  {
+    "title": "What Is DevOps? A Career and Skills Guide for South Africans",
+    "pitch": "How DevOps differs from traditional development and operations roles, the tools and practices it rests on, and the routes into it from an existing IT job.",
+    "pillar": "tech",
+    "cluster": "software"
+  },
+  {
+    "title": "How to Build a Software Developer Portfolio for the South African Job Market",
+    "pitch": "What South African hiring managers look for in a junior developer portfolio, which projects demonstrate real capability, and the common mistakes that get CVs skipped.",
+    "pillar": "tech",
+    "cluster": "software"
+  },
+  {
+    "title": "Cloud Computing Skills South African Employers Are Hiring For",
+    "pitch": "The cloud competencies that appear most often in South African job adverts, how they map to certifications, and a sensible order to learn them in.",
+    "pillar": "tech",
+    "cluster": "software"
+  },
+  {
+    "title": "Agile and Scrum Basics for South African Software Teams",
+    "pitch": "What agile delivery actually asks of a team, the roles and ceremonies that matter, and how smaller South African teams adapt the framework without the overhead.",
+    "pillar": "tech",
+    "cluster": "software"
+  },
+  {
+    "title": "B-BBEE Skills Development Points: How Learnerships Lift Your Scorecard",
+    "pitch": "How learnership spend converts into skills development points, which learner categories carry the most weight, and the planning decisions that affect your score.",
+    "pillar": "skills",
+    "cluster": "bbbee"
+  },
+  {
+    "title": "Who Counts as a Black Designated Group Learner for B-BBEE Purposes?",
+    "pitch": "The learner categories that drive B-BBEE skills development scoring, why designated group status matters, and how to document it correctly for verification.",
+    "pillar": "skills",
+    "cluster": "bbbee"
+  },
+  {
+    "title": "B-BBEE for Small Businesses: EME and QSE Rules South African Owners Should Know",
+    "pitch": "How exempted micro enterprises and qualifying small enterprises are treated differently under B-BBEE, and what each actually needs to do about skills development.",
+    "pillar": "skills",
+    "cluster": "bbbee"
+  },
+  {
+    "title": "How to Choose a Training Provider That Protects Your B-BBEE Score",
+    "pitch": "The accreditation and reporting questions to ask a training provider before committing spend, and the provider shortcomings that cost employers points at verification.",
+    "pillar": "skills",
+    "cluster": "bbbee"
+  },
+  {
+    "title": "Bursaries and B-BBEE: How Funding Studies Earns Scorecard Points",
+    "pitch": "How bursary and tuition support is recognised under the skills development element, what documentation is required, and how it compares with learnership spend.",
+    "pillar": "skills",
+    "cluster": "bbbee"
+  },
+  {
+    "title": "Preparing for B-BBEE Verification: Getting Your Skills Development Evidence in Order",
+    "pitch": "The records a verification agency expects for skills development claims, when to start collecting them, and the gaps that most often reduce a final score.",
+    "pillar": "skills",
+    "cluster": "bbbee"
+  },
+  {
+    "title": "Absorption Explained: Turning Learners into Permanent Employees for B-BBEE Points",
+    "pitch": "What absorption means on the B-BBEE scorecard, the targets attached to it, and how employers plan learnership intakes with permanent placement in mind.",
+    "pillar": "skills",
+    "cluster": "bbbee"
+  },
+  {
+    "title": "What a Weak B-BBEE Scorecard Really Costs a South African Business",
+    "pitch": "How B-BBEE status affects tender eligibility, supplier relationships and procurement spend, and why skills development is often the most improvable element.",
+    "pillar": "skills",
+    "cluster": "bbbee"
+  },
+  {
+    "title": "Disability Learnerships in South Africa: What Employers and Learners Should Know",
+    "pitch": "How learnerships for people with disabilities work, the scorecard recognition attached to them, and the workplace adjustments that make a placement succeed.",
+    "pillar": "skills",
+    "cluster": "learnerships"
+  },
+  {
+    "title": "Hosting Your First Learnership: A Step-by-Step Guide for South African Employers",
+    "pitch": "The practical sequence from choosing a qualification and provider through to SETA registration, mentoring and completion, written for a first-time host employer.",
+    "pillar": "skills",
+    "cluster": "learnerships"
+  },
+  {
+    "title": "Learnership Agreements and SETA Registration: What Employers Must Get Right",
+    "pitch": "The contractual and registration steps that underpin a valid learnership, who signs what, and the administrative errors that delay grants or invalidate claims.",
+    "pillar": "skills",
+    "cluster": "learnerships"
+  },
+  {
+    "title": "Choosing the Right Learnership Qualification for Your Industry in South Africa",
+    "pitch": "How to match a learnership qualification to real skills gaps in your business, read the NQF level correctly, and avoid training that does not transfer to the job.",
+    "pillar": "skills",
+    "cluster": "learnerships"
+  },
+  {
+    "title": "Mandatory and Discretionary Grants: How SETA Funding Actually Works",
+    "pitch": "The difference between the two grant types, what each requires from an employer, and the submission deadlines that determine whether you recover levy spend.",
+    "pillar": "skills",
+    "cluster": "skills-development"
+  },
+  {
+    "title": "Writing a Workplace Skills Plan That Gets Approved",
+    "pitch": "What a SETA looks for in a WSP, how to evidence a genuine skills audit, and the common weaknesses that see plans returned or grants withheld.",
+    "pillar": "skills",
+    "cluster": "skills-development"
+  },
+  {
+    "title": "QCTO Qualifications Explained: What Occupational Qualifications Mean for Employers",
+    "pitch": "How QCTO occupational qualifications differ from older unit-standard programmes, what the shift means for training choices, and how to check a provider's status.",
+    "pillar": "skills",
+    "cluster": "skills-development"
   }
 ]
