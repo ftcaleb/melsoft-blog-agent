@@ -185,10 +185,19 @@ Respond with ONE sentence of 30 words or fewer describing only the scene. No pre
   try {
     // No schema and no web search: one short sentence, so the cheapest path on
     // whichever provider is configured.
+    //
+    // The budget is deliberately far larger than the ~40 tokens the sentence
+    // needs. On a REASONING model (gpt-5.6-luna) the thinking tokens are drawn
+    // from this same allowance, and they vary run to run — measured between 71
+    // and 161 for this prompt. At the previous cap of 200 the reasoning
+    // routinely consumed the lot, so the call returned an empty or
+    // mid-sentence reply and 6 in 8 posts silently fell back to the canned
+    // scene below. max_output_tokens is a CEILING, not a spend: raising it
+    // costs nothing on runs that do not need it.
     const response = await generateText({
       label: 'imagePrompt',
       prompt,
-      maxTokens: 200,
+      maxTokens: 1500,
     });
 
     logModelUsage('imagePrompt', response);
@@ -201,6 +210,16 @@ Respond with ONE sentence of 30 words or fewer describing only the scene. No pre
       // Strip surrounding quotes and any leading label the model may add.
       .replace(/^["'\s]+|["'\s]+$/g, '')
       .replace(/^scene\s*:\s*/i, '');
+
+    // A reply cut off at the token ceiling is a FRAGMENT ('In a converted
+    // Johannesburg warehouse classroom,'), which reads as a valid short scene
+    // to every check below but renders as an incoherent image. Treat it as
+    // unusable explicitly — length alone cannot distinguish it from a
+    // legitimately terse brief.
+    if (response.stop_reason === 'max_tokens') {
+      console.warn('[imageGen] Scene description truncated at the token ceiling — using the fallback scene.');
+      return fallback;
+    }
 
     // A pathologically long or empty reply means the model ignored the brief;
     // the fallback is preferable to feeding junk into the image prompt.
